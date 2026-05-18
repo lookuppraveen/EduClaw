@@ -58,6 +58,17 @@ enum PolicyViolationAction {
   flag
 }
 
+enum FlaggedTurnStatus {
+  pending
+  resolved
+}
+
+enum ReviewDecisionType {
+  approve
+  override
+  escalate
+}
+
 model User {
   id           String          @id
   name         String
@@ -74,6 +85,7 @@ model User {
   conversations Conversation[] @relation("ConversationLearner")
   createdPolicies ValidationPolicy[] @relation("PolicyCreator")
   updatedPolicies ValidationPolicy[] @relation("PolicyUpdater")
+  reviewDecisions ReviewDecision[] @relation("ReviewDecisionReviewer")
 }
 
 model Session {
@@ -274,6 +286,7 @@ model ConversationTurn {
   reflectionOptional  Boolean
   createdAt           DateTime        @default(now())
   traces              AgentTrace[]
+  flaggedTurn         FlaggedTurn?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -312,6 +325,7 @@ model ValidationPolicy {
   updatedAt    DateTime        @updatedAt
   deletedAt    DateTime?
   clauses      PolicyClause[]
+  reviewDecisions ReviewDecision[]
 
   course    Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
   createdBy User   @relation("PolicyCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -330,8 +344,56 @@ model PolicyClause {
   onViolation PolicyViolationAction
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
+  flaggedTurns FlaggedTurn[]
+  reviewDecisions ReviewDecision[]
 
   policy ValidationPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@index([policyId])
+}
+
+model FlaggedTurn {
+  id          String            @id
+  turnId      String            @unique
+  policyId    String
+  clauseId    String
+  courseId    String
+  learnerId   String
+  status      FlaggedTurnStatus @default(pending)
+  reason      String
+  createdAt   DateTime          @default(now())
+  resolvedAt  DateTime?
+  decisions   ReviewDecision[]
+
+  turn   ConversationTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  clause PolicyClause     @relation(fields: [clauseId], references: [id], onDelete: Restrict)
+
+  @@index([policyId])
+  @@index([courseId])
+  @@index([learnerId])
+  @@index([status])
+}
+
+model ReviewDecision {
+  id          String             @id
+  flagId      String
+  reviewerId  String
+  decision    ReviewDecisionType
+  note        String
+  policyId    String
+  clauseId    String
+  courseId    String
+  createdAt   DateTime           @default(now())
+
+  flaggedTurn FlaggedTurn      @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  reviewer    User             @relation("ReviewDecisionReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  policy      ValidationPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  clause      PolicyClause     @relation(fields: [clauseId], references: [id], onDelete: Restrict)
+
+  @@index([flagId])
+  @@index([reviewerId])
+  @@index([policyId])
+  @@index([clauseId])
+  @@index([courseId])
+  @@index([decision])
 }

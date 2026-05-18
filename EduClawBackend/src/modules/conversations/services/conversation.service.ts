@@ -1,10 +1,13 @@
 import { HttpError } from "../../../common/errors.js";
 import { newId } from "../../../common/crypto.js";
 import { hasCourseEnrollment, sharesCourseWithLearner } from "../../../repositories/prisma/course.repository.js";
+import { createFlaggedTurn } from "../../../repositories/prisma/flagged-turn.repository.js";
+import { listPublishedPoliciesForTurn } from "../../../repositories/prisma/policy.repository.js";
 import type { UserRole } from "../../../types/auth.js";
-import type { AgentHop, Conversation, ConversationTurn } from "../../../types/conversations.js";
+import type { AgentHop, Conversation, ConversationTurn, ValidationVerdict } from "../../../types/conversations.js";
 import type { CreateConversationInput, CreateTurnInput } from "../dto/conversation.dto.js";
 import type { ConversationRepository } from "../repositories/conversation.repository.js";
+import { PolicyEvaluatorService } from "../../policies/services/policy-evaluator.service.js";
 import { MockOrchestratorService } from "./mock-orchestrator.service.js";
 
 export interface ActorContext {
@@ -15,7 +18,8 @@ export interface ActorContext {
 export class ConversationService {
   constructor(
     private readonly repository: ConversationRepository,
-    private readonly orchestrator: MockOrchestratorService
+    private readonly orchestrator: MockOrchestratorService,
+    private readonly policyEvaluator: PolicyEvaluatorService
   ) {}
 
   async createConversation(actor: ActorContext, input: CreateConversationInput): Promise<Conversation> {
@@ -76,32 +80,56 @@ export class ConversationService {
       selectedChip: input.selectedChip ?? null
     });
 
+    const assignmentId = input.assignmentId ?? conversation.assignmentId;
+    const policies = await listPublishedPoliciesForTurn(input.courseId, assignmentId);
+    const evaluation = this.policyEvaluator.evaluate(
+      {
+        studentInput: input.message,
+        selectedChip: input.selectedChip ?? null,
+        courseId: input.courseId,
+        assignmentId,
+        inference: orchestrated.inference,
+        execution: orchestrated.execution
+      },
+      policies,
+      orchestrated.validation
+    );
+
     const now = new Date().toISOString();
     const turnId = newId();
-
-    const trace: AgentHop[] = orchestrated.trace.map((item) => ({
-      ...item,
-      turnId
-    }));
+    const trace: AgentHop[] = this.buildTrace(orchestrated.trace, turnId, evaluation.validation);
 
     const turn: ConversationTurn = {
       id: turnId,
       conversationId,
       learnerId: conversation.learnerId,
       courseId: input.courseId,
-      assignmentId: input.assignmentId ?? conversation.assignmentId,
+      assignmentId,
       studentInput: input.message,
       selectedChip: input.selectedChip ?? null,
       inference: orchestrated.inference,
       dialogue: orchestrated.dialogue,
       execution: orchestrated.execution,
-      validation: orchestrated.validation,
+      validation: evaluation.validation,
       reflection: orchestrated.reflection,
       createdAt: now
     };
 
     await this.repository.updateConversationUpdatedAt(conversationId, now);
-    return await this.repository.saveTurn(turn, trace);
+    const savedTurn = await this.repository.saveTurn(turn, trace);
+
+    if (evaluation.violation) {
+      await createFlaggedTurn({
+        turnId: savedTurn.id,
+        policyId: evaluation.violation.policyId,
+        clauseId: evaluation.violation.clause.id,
+        courseId: savedTurn.courseId,
+        learnerId: savedTurn.learnerId,
+        reason: evaluation.violation.reason
+      });
+    }
+
+    return savedTurn;
   }
 
   async getTurnTrace(actor: ActorContext, turnId: string): Promise<AgentHop[]> {
@@ -131,6 +159,21 @@ export class ConversationService {
       internalDetails: "hidden",
       outputSummary: hop.agent === "validation" ? `status=${turn.validation.status}` : hop.outputSummary
     }));
+  }
+
+  private buildTrace(trace: AgentHop[], turnId: string, validation: ValidationVerdict): AgentHop[] {
+    return trace.map((item) => {
+      if (item.agent !== "validation") {
+        return { ...item, turnId };
+      }
+
+      return {
+        ...item,
+        turnId,
+        outputSummary: `status=${validation.status}`,
+        internalDetails: `reason=${validation.reason}; clause=${validation.policyClause || "none"}`
+      };
+    });
   }
 
   private async assertConversationReadAccess(actor: ActorContext, conversation: Conversation): Promise<void> {

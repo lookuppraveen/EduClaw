@@ -107,6 +107,23 @@ export const listPolicies = async (filters: {
   return policies.map(mapPolicy);
 };
 
+
+export const listPublishedPoliciesForTurn = async (courseId: string, assignmentId: string | null): Promise<ValidationPolicy[]> => {
+  const policies = await prisma.validationPolicy.findMany({
+    where: {
+      courseId,
+      status: "published",
+      deletedAt: null,
+      OR: assignmentId
+        ? [{ assignmentId }, { assignmentId: null }]
+        : [{ assignmentId: null }]
+    },
+    include: { clauses: { orderBy: { createdAt: "asc" } } },
+    orderBy: { publishedAt: "desc" }
+  });
+
+  return policies.map(mapPolicy);
+};
 export const findPolicyById = async (policyId: string): Promise<ValidationPolicy | null> => {
   const policy = await prisma.validationPolicy.findFirst({
     where: { id: policyId, deletedAt: null },

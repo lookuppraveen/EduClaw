@@ -12,6 +12,7 @@ import { consentRouter } from "./modules/consent/consent.routes.js";
 import { conversationsRouter } from "./modules/conversations/conversations.routes.js";
 import { turnsRouter } from "./modules/conversations/turns.routes.js";
 import { policiesRouter } from "./modules/policies/policies.routes.js";
+import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 
 export const app = express();
 
@@ -28,5 +29,6 @@ app.use("/api/v1/consents", requireAuth, requireRoles(["student", "faculty", "ad
 app.use("/api/v1/conversations", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), conversationsRouter);
 app.use("/api/v1/turns", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), turnsRouter);
 app.use("/api/v1/policies", requireAuth, requireRoles(["faculty", "admin"]), policiesRouter);
+app.use("/api/v1/reviews", requireAuth, requireRoles(["faculty", "admin"]), reviewsRouter);
 
 app.use(errorMiddleware);

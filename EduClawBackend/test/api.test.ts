@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { app } from "../src/app.js";
+import { findFlaggedTurnByTurnId } from "../src/repositories/prisma/flagged-turn.repository.js";
 
 const loginAs = async (email: string) => {
   return request(app)
@@ -333,6 +334,231 @@ describe("EduClaw backend APIs", () => {
 
     expect(auditorTrace.status).toBe(200);
     expect(auditorTrace.body.trace[0].internalDetails).not.toBe("hidden");
+  });
+
+
+  it("evaluates published policies during turn processing and emits flagged review events", async () => {
+    const facultyLogin = await loginAs("carter@example.edu");
+    const facultyToken = facultyLogin.body.accessToken;
+
+    const policyResponse = await request(app)
+      .post("/api/v1/policies")
+      .set("Authorization", `Bearer ${facultyToken}`)
+      .send({
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_eval",
+        title: "Policy Evaluation Guardrails",
+        clauses: [
+          {
+            rule: "Guide with analogous examples instead of final answers",
+            when: "student asks for direct answer",
+            onViolation: "modify"
+          }
+        ]
+      });
+
+    expect(policyResponse.status).toBe(201);
+    const policyId = policyResponse.body.policy.id as string;
+
+    const publishResponse = await request(app)
+      .post(`/api/v1/policies/${policyId}/publish`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(publishResponse.status).toBe(200);
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const conversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_eval"
+      });
+
+    expect(conversationResponse.status).toBe(201);
+    const conversationId = conversationResponse.body.conversation.id as string;
+
+    const turnResponse = await request(app)
+      .post(`/api/v1/conversations/${conversationId}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "Can you give me the direct answer?",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_eval",
+        selectedChip: null
+      });
+
+    expect(turnResponse.status).toBe(201);
+    expect(turnResponse.body.turn.validation.status).toBe("modified");
+    expect(turnResponse.body.turn.validation.reason).toContain("Policy Evaluation Guardrails");
+
+    const flagged = await findFlaggedTurnByTurnId(turnResponse.body.turn.id as string);
+    expect(flagged?.policyId).toBe(policyId);
+    expect(flagged?.status).toBe("pending");
+  });
+
+  it("blocks turns when a published policy clause requires blocking", async () => {
+    const facultyLogin = await loginAs("carter@example.edu");
+    const facultyToken = facultyLogin.body.accessToken;
+
+    const policyResponse = await request(app)
+      .post("/api/v1/policies")
+      .set("Authorization", `Bearer ${facultyToken}`)
+      .send({
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_block",
+        title: "Reflection Integrity Guardrails",
+        clauses: [
+          {
+            rule: "Do not write reflections on behalf of learners",
+            when: "student asks to write reflection text",
+            onViolation: "block"
+          }
+        ]
+      });
+
+    expect(policyResponse.status).toBe(201);
+
+    const publishResponse = await request(app)
+      .post(`/api/v1/policies/${policyResponse.body.policy.id}/publish`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(publishResponse.status).toBe(200);
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const conversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_block"
+      });
+
+    const turnResponse = await request(app)
+      .post(`/api/v1/conversations/${conversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`)
+      .send({
+        message: "Please write my reflection text for me",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_policy_block",
+        selectedChip: null
+      });
+
+    expect(turnResponse.status).toBe(201);
+    expect(turnResponse.body.turn.validation.status).toBe("blocked");
+
+    const flagged = await findFlaggedTurnByTurnId(turnResponse.body.turn.id as string);
+    expect(flagged?.status).toBe("pending");
+  });
+
+
+  it("supports faculty flagged review queue, detail, and decision workflow", async () => {
+    const facultyLogin = await loginAs("carter@example.edu");
+    const facultyToken = facultyLogin.body.accessToken;
+
+    const policyResponse = await request(app)
+      .post("/api/v1/policies")
+      .set("Authorization", `Bearer ${facultyToken}`)
+      .send({
+        courseId: "crs_math_1550",
+        assignmentId: "asg_review_queue",
+        title: "Review Queue Guardrails",
+        clauses: [
+          {
+            rule: "Guide with analogous examples instead of final answers",
+            when: "student asks for direct answer",
+            onViolation: "modify"
+          }
+        ]
+      });
+
+    expect(policyResponse.status).toBe(201);
+
+    const publishResponse = await request(app)
+      .post(`/api/v1/policies/${policyResponse.body.policy.id}/publish`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(publishResponse.status).toBe(200);
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+    const conversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_review_queue"
+      });
+
+    const turnResponse = await request(app)
+      .post(`/api/v1/conversations/${conversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "Please give me the direct answer",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_review_queue",
+        selectedChip: null
+      });
+
+    expect(turnResponse.status).toBe(201);
+    const flagged = await findFlaggedTurnByTurnId(turnResponse.body.turn.id as string);
+    expect(flagged?.status).toBe("pending");
+
+    const listResponse = await request(app)
+      .get("/api/v1/reviews/flagged?courseId=crs_math_1550&status=pending")
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.flagged.some((item: { id: string }) => item.id === flagged?.id)).toBe(true);
+
+    const detailResponse = await request(app)
+      .get(`/api/v1/reviews/flagged/${flagged?.id}`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.flaggedTurn.id).toBe(flagged?.id);
+    expect(detailResponse.body.flaggedTurn.decisions).toHaveLength(0);
+
+    const decisionResponse = await request(app)
+      .post(`/api/v1/reviews/flagged/${flagged?.id}/decision`)
+      .set("Authorization", `Bearer ${facultyToken}`)
+      .send({ decision: "override", note: "Allowed because this was non-graded practice." });
+
+    expect(decisionResponse.status).toBe(201);
+    expect(decisionResponse.body.decision.reviewerId).toBe("usr_faculty_1");
+    expect(decisionResponse.body.decision.policyId).toBe(flagged?.policyId);
+    expect(decisionResponse.body.decision.clauseId).toBe(flagged?.clauseId);
+
+    const resolvedResponse = await request(app)
+      .get("/api/v1/reviews/flagged?courseId=crs_math_1550&status=resolved")
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(resolvedResponse.status).toBe(200);
+    expect(resolvedResponse.body.flagged.some((item: { id: string }) => item.id === flagged?.id)).toBe(true);
+
+    const reviewedDetail = await request(app)
+      .get(`/api/v1/reviews/flagged/${flagged?.id}`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(reviewedDetail.status).toBe(200);
+    expect(reviewedDetail.body.flaggedTurn.status).toBe("resolved");
+    expect(reviewedDetail.body.flaggedTurn.decisions).toHaveLength(1);
+  });
+
+  it("denies flagged review endpoints for student role", async () => {
+    const studentLogin = await loginAs("maya@example.edu");
+
+    const response = await request(app)
+      .get("/api/v1/reviews/flagged")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("AUTH_FORBIDDEN");
   });
 
   it("returns validation error for malformed conversation payload", async () => {
