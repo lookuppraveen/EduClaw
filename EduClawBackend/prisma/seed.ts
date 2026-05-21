@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 const prisma = new PrismaClient();
 
 export const seedDatabase = async (client: PrismaClient): Promise<void> => {
+  await client.auditLog.deleteMany();
+  await client.integrationStatus.deleteMany();
   await client.reviewDecision.deleteMany();
   await client.flaggedTurn.deleteMany();
   await client.agentTrace.deleteMany();
@@ -27,6 +29,7 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
   await client.user.createMany({
     data: [
       { id: "usr_student_1", name: "Maya Chen", email: "maya@example.edu", role: "student" },
+      { id: "usr_student_2", name: "Jordan Rivera", email: "jordan@example.edu", role: "student" },
       { id: "usr_faculty_1", name: "Prof. Carter", email: "carter@example.edu", role: "faculty" },
       { id: "usr_admin_1", name: "Admin Jane", email: "admin@example.edu", role: "admin" },
       { id: "usr_advisor_1", name: "Advisor Lee", email: "advisor@example.edu", role: "advisor" },
@@ -72,6 +75,7 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
   });
 
   await client.learnerState.create({ data: { learnerId: "usr_student_1" } });
+  await client.learnerState.create({ data: { learnerId: "usr_student_2" } });
 
   await client.learnerGoal.create({
     data: {
@@ -115,6 +119,45 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
     }
   });
 
+  await client.consent.create({
+    data: {
+      learnerId: "usr_student_2",
+      courseContext: true,
+      priorConversations: true,
+      advisorVisibility: true,
+      thirdPartyTools: false,
+      updatedAt: new Date("2026-05-10T09:30:00.000Z")
+    }
+  });
+
+  await client.consentHistory.create({
+    data: {
+      id: "consent_event_seed_1",
+      learnerId: "usr_student_1",
+      actorUserId: "usr_student_1",
+      reason: "Initial seeded consent preferences",
+      courseContext: true,
+      priorConversations: true,
+      advisorVisibility: false,
+      thirdPartyTools: false,
+      createdAt: new Date("2026-05-10T09:00:00.000Z")
+    }
+  });
+
+  await client.consentHistory.create({
+    data: {
+      id: "consent_event_seed_2",
+      learnerId: "usr_student_2",
+      actorUserId: "usr_student_2",
+      reason: "Advisor support enabled without course overlap",
+      courseContext: true,
+      priorConversations: true,
+      advisorVisibility: true,
+      thirdPartyTools: false,
+      createdAt: new Date("2026-05-10T09:30:00.000Z")
+    }
+  });
+
   await client.validationPolicy.create({
     data: {
       id: "pol_math_hw_guardrails",
@@ -142,6 +185,55 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
         ]
       }
     }
+  });
+
+  await client.integrationStatus.createMany({
+    data: [
+      {
+        name: "lms",
+        displayName: "Canvas LMS",
+        status: "connected",
+        details: "Course roster sync healthy",
+        lastCheckedAt: new Date("2026-05-12T10:00:00.000Z")
+      },
+      {
+        name: "sso",
+        displayName: "Okta SSO",
+        status: "connected",
+        details: "Token exchange adapter responding",
+        lastCheckedAt: new Date("2026-05-12T10:05:00.000Z")
+      },
+      {
+        name: "chat",
+        displayName: "Campus Chat",
+        status: "degraded",
+        details: "Webhook latency above target",
+        lastCheckedAt: new Date("2026-05-12T10:10:00.000Z")
+      }
+    ]
+  });
+
+  await client.auditLog.createMany({
+    data: [
+      {
+        id: "audit_seed_policy_publish",
+        actorUserId: "usr_faculty_1",
+        action: "policy.publish",
+        targetType: "validation_policy",
+        targetId: "pol_math_hw_guardrails",
+        metadata: { courseId: "crs_math_1550" },
+        createdAt: new Date("2026-05-12T10:00:00.000Z")
+      },
+      {
+        id: "audit_seed_consent_update",
+        actorUserId: "usr_student_1",
+        action: "consent.update",
+        targetType: "consent",
+        targetId: "usr_student_1",
+        metadata: { advisorVisibility: false },
+        createdAt: new Date("2026-05-10T09:00:00.000Z")
+      }
+    ]
   });
 };
 

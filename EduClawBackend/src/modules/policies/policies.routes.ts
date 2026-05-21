@@ -6,6 +6,7 @@ import {
   hasCourseEnrollmentRole,
   listCourseIdsForEnrollmentRole
 } from "../../repositories/prisma/course.repository.js";
+import { createAuditLog } from "../../repositories/prisma/admin.repository.js";
 import {
   archivePolicy,
   createPolicy,
@@ -119,6 +120,17 @@ policiesRouter.post("/", asyncHandler(async (req, res) => {
     clauses: body.clauses,
     actorUserId: authUser.id
   });
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "policy.create",
+    targetType: "validation_policy",
+    targetId: policy.id,
+    metadata: {
+      courseId: policy.courseId,
+      assignmentId: policy.assignmentId,
+      clauseCount: policy.clauses.length
+    }
+  });
 
   return res.status(201).json({ policy });
 }));
@@ -151,6 +163,17 @@ policiesRouter.put("/:policyId", asyncHandler(async (req, res) => {
     clauses: body.clauses,
     actorUserId: authUser.id
   });
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "policy.update",
+    targetType: "validation_policy",
+    targetId: policy.id,
+    metadata: {
+      courseId: policy.courseId,
+      assignmentId: policy.assignmentId,
+      clauseCount: policy.clauses.length
+    }
+  });
 
   return res.status(200).json({ policy });
 }));
@@ -162,8 +185,18 @@ policiesRouter.delete("/:policyId", asyncHandler(async (req, res) => {
   }
 
   const policyId = requireParam(req.params.policyId, "policyId");
-  await assertExistingPolicyAccess(authUser.id, authUser.roles, policyId);
+  const policy = await assertExistingPolicyAccess(authUser.id, authUser.roles, policyId);
   await archivePolicy(policyId, authUser.id);
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "policy.archive",
+    targetType: "validation_policy",
+    targetId: policyId,
+    metadata: {
+      courseId: policy.courseId,
+      assignmentId: policy.assignmentId
+    }
+  });
 
   return res.status(204).send();
 }));
@@ -181,5 +214,16 @@ policiesRouter.post("/:policyId/publish", asyncHandler(async (req, res) => {
   }
 
   const policy = await publishPolicy(policyId, authUser.id);
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "policy.publish",
+    targetType: "validation_policy",
+    targetId: policy.id,
+    metadata: {
+      courseId: policy.courseId,
+      assignmentId: policy.assignmentId,
+      clauseCount: policy.clauses.length
+    }
+  });
   return res.status(200).json({ policy });
 }));

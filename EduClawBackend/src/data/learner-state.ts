@@ -23,6 +23,7 @@ export const learnerStates: LearnerState[] = [
         id: "refl_1",
         prompt: "How would you explain chain rule in one sentence?",
         response: "Differentiate outer, keep inner, then multiply by derivative of inner.",
+        kind: "metacognitive",
         createdAt: "2026-05-11T10:00:00.000Z"
       }
     ]

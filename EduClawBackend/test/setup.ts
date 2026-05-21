@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import { beforeAll, beforeEach } from "vitest";
 import { seedDatabase } from "../prisma/seed.js";
+import { resetIdempotencyState } from "../src/common/idempotency-middleware.js";
+import { resetRateLimitState } from "../src/common/rate-limit-middleware.js";
 
 config({ path: ".env.test", override: true });
 
@@ -12,5 +14,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  resetIdempotencyState();
+  resetRateLimitState();
   await seedDatabase(prisma);
 });

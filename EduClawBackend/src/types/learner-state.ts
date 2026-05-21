@@ -17,6 +17,7 @@ export interface ReflectionEntry {
   id: string;
   prompt: string;
   response: string;
+  kind: "metacognitive" | "goal_check";
   createdAt: string;
 }
 

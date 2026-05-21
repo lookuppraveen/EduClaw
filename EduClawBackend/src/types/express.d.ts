@@ -5,6 +5,12 @@ declare module "express-serve-static-core" {
       id: string;
       roles: ("student" | "faculty" | "advisor" | "admin" | "auditor")[];
     };
+    traceContext?: {
+      traceId: string;
+      spanId: string;
+      parentSpanId: string | null;
+      sampled: boolean;
+    };
   }
 }
 

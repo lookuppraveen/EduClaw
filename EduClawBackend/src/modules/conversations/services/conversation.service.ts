@@ -2,6 +2,8 @@ import { HttpError } from "../../../common/errors.js";
 import { newId } from "../../../common/crypto.js";
 import { hasCourseEnrollment, sharesCourseWithLearner } from "../../../repositories/prisma/course.repository.js";
 import { createFlaggedTurn } from "../../../repositories/prisma/flagged-turn.repository.js";
+import { updateMasteryFromCompletedTurn } from "../../../repositories/prisma/learner-state.repository.js";
+import { createAuditLog } from "../../../repositories/prisma/admin.repository.js";
 import { listPublishedPoliciesForTurn } from "../../../repositories/prisma/policy.repository.js";
 import type { UserRole } from "../../../types/auth.js";
 import type { AgentHop, Conversation, ConversationTurn, ValidationVerdict } from "../../../types/conversations.js";
@@ -118,14 +120,46 @@ export class ConversationService {
     await this.repository.updateConversationUpdatedAt(conversationId, now);
     const savedTurn = await this.repository.saveTurn(turn, trace);
 
+    await updateMasteryFromCompletedTurn({
+      learnerId: savedTurn.learnerId,
+      courseId: savedTurn.courseId,
+      turnId: savedTurn.id,
+      knowledgeGap: savedTurn.inference.knowledgeGap,
+      confidence: savedTurn.inference.confidence,
+      validationStatus: savedTurn.validation.status
+    });
+    await createAuditLog({
+      actorUserId: actor.userId,
+      action: "conversation.turn.create",
+      targetType: "conversation_turn",
+      targetId: savedTurn.id,
+      metadata: {
+        learnerId: savedTurn.learnerId,
+        courseId: savedTurn.courseId,
+        validationStatus: savedTurn.validation.status
+      }
+    });
+
     if (evaluation.violation) {
-      await createFlaggedTurn({
+      const flaggedTurn = await createFlaggedTurn({
         turnId: savedTurn.id,
         policyId: evaluation.violation.policyId,
         clauseId: evaluation.violation.clause.id,
         courseId: savedTurn.courseId,
         learnerId: savedTurn.learnerId,
         reason: evaluation.violation.reason
+      });
+      await createAuditLog({
+        actorUserId: actor.userId,
+        action: "flagged_turn.create",
+        targetType: "flagged_turn",
+        targetId: flaggedTurn.id,
+        metadata: {
+          turnId: savedTurn.id,
+          policyId: flaggedTurn.policyId,
+          clauseId: flaggedTurn.clauseId,
+          courseId: flaggedTurn.courseId
+        }
       });
     }
 

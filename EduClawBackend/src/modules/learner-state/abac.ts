@@ -6,7 +6,7 @@ import type { UserRole } from "../../types/auth.js";
 const hasRole = (roles: UserRole[], role: UserRole): boolean => roles.includes(role);
 
 export const assertLearnerReadAccess = async (actorUserId: string, actorRoles: UserRole[], learnerId: string): Promise<void> => {
-  if (hasRole(actorRoles, "admin") || hasRole(actorRoles, "auditor")) {
+  if (hasRole(actorRoles, "admin")) {
     return;
   }
 
@@ -37,5 +37,11 @@ export const assertLearnerReadAccess = async (actorUserId: string, actorRoles: U
 export const assertConsentWriteAccess = (actorUserId: string, learnerId: string): void => {
   if (actorUserId !== learnerId) {
     throw new HttpError(403, "CONSENT_FORBIDDEN", "Only learner can update own consent settings");
+  }
+};
+
+export const assertLearnerWriteAccess = (actorUserId: string, learnerId: string): void => {
+  if (actorUserId !== learnerId) {
+    throw new HttpError(403, "LEARNER_STATE_FORBIDDEN", "Only learner can update own learner state");
   }
 };

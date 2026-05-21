@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../common/async-handler.js";
 import { HttpError } from "../../common/errors.js";
+import { createAuditLog } from "../../repositories/prisma/admin.repository.js";
 import { ReviewService } from "./services/review.service.js";
 
 const listQuerySchema = z.object({
@@ -65,6 +66,17 @@ reviewsRouter.post("/flagged/:flagId/decision", asyncHandler(async (req, res) =>
     flagId,
     body
   );
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "review.decision.create",
+    targetType: "review_decision",
+    targetId: decision.id,
+    metadata: {
+      flagId,
+      decision: decision.decision,
+      courseId: decision.courseId
+    }
+  });
 
   return res.status(201).json({ decision });
 }));

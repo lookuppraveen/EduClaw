@@ -69,6 +69,12 @@ enum ReviewDecisionType {
   escalate
 }
 
+enum IntegrationStatusValue {
+  connected
+  degraded
+  disconnected
+}
+
 model User {
   id           String          @id
   name         String
@@ -86,6 +92,7 @@ model User {
   createdPolicies ValidationPolicy[] @relation("PolicyCreator")
   updatedPolicies ValidationPolicy[] @relation("PolicyUpdater")
   reviewDecisions ReviewDecision[] @relation("ReviewDecisionReviewer")
+  auditLogs AuditLog[] @relation("AuditLogActor")
 }
 
 model Session {
@@ -396,4 +403,30 @@ model ReviewDecision {
   @@index([clauseId])
   @@index([courseId])
   @@index([decision])
+}
+
+model IntegrationStatus {
+  name          String                 @id
+  displayName   String
+  status        IntegrationStatusValue
+  details       String
+  lastCheckedAt DateTime
+  updatedAt     DateTime               @updatedAt
+}
+
+model AuditLog {
+  id          String   @id
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json
+  createdAt   DateTime @default(now())
+
+  actor User? @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([targetType])
+  @@index([createdAt])
 }

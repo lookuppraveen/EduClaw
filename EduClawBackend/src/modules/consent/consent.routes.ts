@@ -3,6 +3,7 @@ import { z } from "zod";
 import { HttpError } from "../../common/errors.js";
 import { asyncHandler } from "../../common/async-handler.js";
 import { getConsentRecord, listConsentEvents, updateConsentRecord } from "../../repositories/prisma/consent.repository.js";
+import { createAuditLog } from "../../repositories/prisma/admin.repository.js";
 import { assertConsentWriteAccess } from "../learner-state/abac.js";
 
 const consentScopeSchema = z.object({
@@ -41,6 +42,16 @@ consentRouter.put("/me", asyncHandler(async (req, res) => {
 
   const body = updateConsentSchema.parse(req.body);
   const updated = await updateConsentRecord(authUser.id, authUser.id, body.scopes, body.reason ?? null);
+  await createAuditLog({
+    actorUserId: authUser.id,
+    action: "consent.update",
+    targetType: "consent",
+    targetId: authUser.id,
+    metadata: {
+      scopes: body.scopes,
+      reason: body.reason ?? null
+    }
+  });
 
   return res.status(200).json({ consent: updated });
 }));

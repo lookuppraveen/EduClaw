@@ -17,6 +17,32 @@ describe("EduClaw backend APIs", () => {
     expect(response.body).toEqual({ status: "ok" });
   });
 
+  it("propagates W3C trace context on responses", async () => {
+    const traceId = "11111111111111111111111111111111";
+    const parentSpanId = "2222222222222222";
+
+    const response = await request(app)
+      .get("/api/v1/health")
+      .set("traceparent", `00-${traceId}-${parentSpanId}-01`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.traceparent).toMatch(new RegExp(`^00-${traceId}-[a-f0-9]{16}-01$`));
+    expect(response.headers.traceparent).not.toContain(parentSpanId);
+  });
+
+  it("rate limits repeated requests from the same client bucket", async () => {
+    const clientId = "rate-limit-test-client";
+    let response = await request(app).get("/api/v1/health").set("x-client-id", clientId);
+
+    for (let index = 0; index < 100; index += 1) {
+      response = await request(app).get("/api/v1/health").set("x-client-id", clientId);
+    }
+
+    expect(response.status).toBe(429);
+    expect(response.body.error.code).toBe("RATE_LIMITED");
+    expect(response.headers["ratelimit-limit"]).toBe("100");
+  });
+
   it("supports auth login and me", async () => {
     const loginResponse = await loginAs("maya@example.edu");
 
@@ -118,6 +144,106 @@ describe("EduClaw backend APIs", () => {
     expect(masteryResponse.body.mastery.length).toBeGreaterThan(0);
   });
 
+  it("allows student to update own learner goals", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+    const token = loginResponse.body.accessToken;
+
+    const response = await request(app)
+      .put("/api/v1/learners/usr_student_1/goals")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        goals: [
+          { text: "Practice chain rule setup without looking at examples" },
+          { text: "Review product rule comparison before quiz" }
+        ]
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.learnerId).toBe("usr_student_1");
+    expect(response.body.goals).toHaveLength(2);
+    expect(response.body.goals[0].text).toBe("Practice chain rule setup without looking at examples");
+
+    const stateResponse = await request(app)
+      .get("/api/v1/learners/usr_student_1/state")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(stateResponse.status).toBe(200);
+    expect(stateResponse.body.goals).toHaveLength(2);
+  });
+
+  it("allows student to create own reflection entries", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+    const token = loginResponse.body.accessToken;
+
+    const response = await request(app)
+      .post("/api/v1/learners/usr_student_1/reflections")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        prompt: "What helped chain rule click today?",
+        response: "Separating inner and outer functions before differentiating.",
+        kind: "metacognitive"
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.learnerId).toBe("usr_student_1");
+    expect(response.body.reflection.prompt).toBe("What helped chain rule click today?");
+
+    const reflectionsResponse = await request(app)
+      .get("/api/v1/learners/usr_student_1/reflections")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(reflectionsResponse.status).toBe(200);
+    expect(reflectionsResponse.body.reflections.some((item: { id: string }) => item.id === response.body.reflection.id)).toBe(true);
+  });
+
+  it("paginates and filters learner reflections", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+    const token = loginResponse.body.accessToken;
+
+    for (const [index, kind] of ["metacognitive", "metacognitive", "goal_check"].entries()) {
+      const response = await request(app)
+        .post("/api/v1/learners/usr_student_1/reflections")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          prompt: `Reflection prompt ${index}`,
+          response: `Reflection response ${index}`,
+          kind
+        });
+
+      expect(response.status).toBe(201);
+    }
+
+    const firstPage = await request(app)
+      .get("/api/v1/learners/usr_student_1/reflections?kind=metacognitive&limit=2")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.reflections).toHaveLength(2);
+    expect(firstPage.body.reflections.every((item: { kind: string }) => item.kind === "metacognitive")).toBe(true);
+    expect(firstPage.body.page.limit).toBe(2);
+    expect(firstPage.body.page.nextCursor).toBeTypeOf("string");
+
+    const secondPage = await request(app)
+      .get(`/api/v1/learners/usr_student_1/reflections?kind=metacognitive&limit=2&cursor=${firstPage.body.page.nextCursor}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.reflections).toHaveLength(1);
+    expect(secondPage.body.page.nextCursor).toBeNull();
+  });
+
+  it("blocks learner-state writes for other users", async () => {
+    const loginResponse = await loginAs("advisor@example.edu");
+
+    const response = await request(app)
+      .put("/api/v1/learners/usr_student_1/goals")
+      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .send({ goals: ["Attempt two similar examples before asking for hints"] });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("LEARNER_STATE_FORBIDDEN");
+  });
+
   it("allows faculty with shared course to read learner state", async () => {
     const loginResponse = await loginAs("carter@example.edu");
 
@@ -168,6 +294,36 @@ describe("EduClaw backend APIs", () => {
     expect(stateResponse.status).toBe(200);
   });
 
+  it("blocks advisor learner-state access when consent exists but shared context is missing", async () => {
+    const advisorLogin = await loginAs("advisor@example.edu");
+
+    const response = await request(app)
+      .get("/api/v1/learners/usr_student_2/state")
+      .set("Authorization", `Bearer ${advisorLogin.body.accessToken}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("LEARNER_STATE_FORBIDDEN");
+  });
+
+  it("blocks auditor from raw learner state while preserving FERPA explorer access", async () => {
+    const auditorLogin = await loginAs("auditor@example.edu");
+    const token = auditorLogin.body.accessToken;
+
+    const stateResponse = await request(app)
+      .get("/api/v1/learners/usr_student_1/state")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(stateResponse.status).toBe(403);
+    expect(stateResponse.body.error.code).toBe("LEARNER_STATE_FORBIDDEN");
+
+    const ferpaResponse = await request(app)
+      .get("/api/v1/audit/ferpa-scope?learnerId=usr_student_1")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(ferpaResponse.status).toBe(200);
+    expect(ferpaResponse.body.records).toHaveLength(1);
+  });
+
   it("supports consent read/update/history for learner", async () => {
     const loginResponse = await loginAs("maya@example.edu");
     const token = loginResponse.body.accessToken;
@@ -202,6 +358,101 @@ describe("EduClaw backend APIs", () => {
     expect(historyResponse.status).toBe(200);
     expect(Array.isArray(historyResponse.body.events)).toBe(true);
     expect(historyResponse.body.events.length).toBeGreaterThan(0);
+  });
+
+  it("replays idempotent sensitive writes and rejects key reuse with different payload", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+    const token = loginResponse.body.accessToken;
+    const idempotencyKey = "consent-update-idempotency-test";
+    const payload = {
+      scopes: [
+        { key: "course_context", enabled: true },
+        { key: "prior_conversations", enabled: true },
+        { key: "advisor_visibility", enabled: true },
+        { key: "third_party_tools", enabled: false }
+      ],
+      reason: "Idempotent advisor support update"
+    };
+
+    const firstResponse = await request(app)
+      .put("/api/v1/consents/me")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(payload);
+
+    expect(firstResponse.status).toBe(200);
+
+    const replayResponse = await request(app)
+      .put("/api/v1/consents/me")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(payload);
+
+    expect(replayResponse.status).toBe(200);
+    expect(replayResponse.headers["idempotency-replayed"]).toBe("true");
+    expect(replayResponse.body).toEqual(firstResponse.body);
+
+    const conflictResponse = await request(app)
+      .put("/api/v1/consents/me")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({
+        ...payload,
+        reason: "Different body with reused key"
+      });
+
+    expect(conflictResponse.status).toBe(409);
+    expect(conflictResponse.body.error.code).toBe("IDEMPOTENCY_CONFLICT");
+
+    const historyResponse = await request(app)
+      .get("/api/v1/consents/me/history")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(historyResponse.body.events.filter((event: { reason: string | null }) => event.reason === payload.reason)).toHaveLength(1);
+  });
+
+  it("emits audit events for consent and learner-state mutations", async () => {
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const consentResponse = await request(app)
+      .put("/api/v1/consents/me")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        scopes: [
+          { key: "course_context", enabled: true },
+          { key: "prior_conversations", enabled: true },
+          { key: "advisor_visibility", enabled: true },
+          { key: "third_party_tools", enabled: false }
+        ],
+        reason: "Audit event test"
+      });
+
+    expect(consentResponse.status).toBe(200);
+
+    const goalsResponse = await request(app)
+      .put("/api/v1/learners/usr_student_1/goals")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({ goals: ["Prepare for the next calculus review"] });
+
+    expect(goalsResponse.status).toBe(200);
+
+    const adminLogin = await loginAs("admin@example.edu");
+    const adminToken = adminLogin.body.accessToken;
+
+    const consentAudit = await request(app)
+      .get("/api/v1/admin/audit-logs?action=consent.update")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(consentAudit.status).toBe(200);
+    expect(consentAudit.body.logs.some((log: { targetId: string | null }) => log.targetId === "usr_student_1")).toBe(true);
+
+    const goalsAudit = await request(app)
+      .get("/api/v1/admin/audit-logs?action=learner.goals.update")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(goalsAudit.status).toBe(200);
+    expect(goalsAudit.body.logs.some((log: { targetId: string | null }) => log.targetId === "usr_student_1")).toBe(true);
   });
 
   it("creates conversation and allows learner to get it and list turns", async () => {
@@ -272,6 +523,49 @@ describe("EduClaw backend APIs", () => {
 
     expect(traceResponse.status).toBe(200);
     expect(traceResponse.body.trace).toHaveLength(5);
+  });
+
+  it("updates learner mastery after completed conversation turn", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+    const token = loginResponse.body.accessToken;
+
+    const initialMasteryResponse = await request(app)
+      .get("/api/v1/learners/usr_student_1/mastery")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(initialMasteryResponse.status).toBe(200);
+    const initialChainRule = initialMasteryResponse.body.mastery.find((item: { outcomeId: string }) => item.outcomeId === "out_math_chain_rule");
+    expect(initialChainRule.score).toBe(0.62);
+
+    const createConversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_mastery_update"
+      });
+
+    const createTurnResponse = await request(app)
+      .post(`/api/v1/conversations/${createConversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        message: "Can you help me understand chain rule composition?",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_mastery_update",
+        selectedChip: null
+      });
+
+    expect(createTurnResponse.status).toBe(201);
+
+    const updatedMasteryResponse = await request(app)
+      .get("/api/v1/learners/usr_student_1/mastery")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(updatedMasteryResponse.status).toBe(200);
+    const updatedChainRule = updatedMasteryResponse.body.mastery.find((item: { outcomeId: string }) => item.outcomeId === "out_math_chain_rule");
+    expect(updatedChainRule.score).toBeGreaterThan(initialChainRule.score);
+    expect(updatedChainRule.evidence).toBe(`Conversation turn ${createTurnResponse.body.turn.id}`);
   });
 
   it("enforces trace visibility by role", async () => {
@@ -534,6 +828,14 @@ describe("EduClaw backend APIs", () => {
     expect(decisionResponse.body.decision.policyId).toBe(flagged?.policyId);
     expect(decisionResponse.body.decision.clauseId).toBe(flagged?.clauseId);
 
+    const adminLogin = await loginAs("admin@example.edu");
+    const auditResponse = await request(app)
+      .get("/api/v1/admin/audit-logs?action=review.decision.create")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`);
+
+    expect(auditResponse.status).toBe(200);
+    expect(auditResponse.body.logs.some((log: { targetId: string | null }) => log.targetId === decisionResponse.body.decision.id)).toBe(true);
+
     const resolvedResponse = await request(app)
       .get("/api/v1/reviews/flagged?courseId=crs_math_1550&status=resolved")
       .set("Authorization", `Bearer ${facultyToken}`);
@@ -629,6 +931,14 @@ describe("EduClaw backend APIs", () => {
     expect(publishResponse.body.policy.status).toBe("published");
     expect(publishResponse.body.policy.publishedAt).toBeTypeOf("string");
 
+    const adminLogin = await loginAs("admin@example.edu");
+    const auditResponse = await request(app)
+      .get("/api/v1/admin/audit-logs?action=policy.publish")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`);
+
+    expect(auditResponse.status).toBe(200);
+    expect(auditResponse.body.logs.some((log: { targetId: string | null }) => log.targetId === policyId)).toBe(true);
+
     const listResponse = await request(app)
       .get("/api/v1/policies?courseId=crs_math_1550")
       .set("Authorization", `Bearer ${token}`);
@@ -675,5 +985,77 @@ describe("EduClaw backend APIs", () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error.code).toBe("AUTH_FORBIDDEN");
+  });
+
+  it("supports admin KPI, integration, and audit log APIs", async () => {
+    const loginResponse = await loginAs("admin@example.edu");
+    const token = loginResponse.body.accessToken;
+
+    const kpisResponse = await request(app)
+      .get("/api/v1/admin/kpis")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(kpisResponse.status).toBe(200);
+    expect(kpisResponse.body.kpis.users.total).toBe(6);
+    expect(kpisResponse.body.kpis.courses.total).toBe(3);
+
+    const integrationsResponse = await request(app)
+      .get("/api/v1/admin/integrations")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(integrationsResponse.status).toBe(200);
+    expect(integrationsResponse.body.integrations.length).toBeGreaterThan(0);
+
+    const updateIntegrationResponse = await request(app)
+      .put("/api/v1/admin/integrations/chat")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        status: "connected",
+        details: "Webhook latency back within target"
+      });
+
+    expect(updateIntegrationResponse.status).toBe(200);
+    expect(updateIntegrationResponse.body.integration.status).toBe("connected");
+
+    const auditResponse = await request(app)
+      .get("/api/v1/admin/audit-logs?action=integration.update")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(auditResponse.status).toBe(200);
+    expect(auditResponse.body.logs.some((log: { targetId: string | null }) => log.targetId === "chat")).toBe(true);
+    expect(auditResponse.body.page.limit).toBe(50);
+  });
+
+  it("denies admin APIs for non-admin roles", async () => {
+    const loginResponse = await loginAs("maya@example.edu");
+
+    const response = await request(app)
+      .get("/api/v1/admin/kpis")
+      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("AUTH_FORBIDDEN");
+  });
+
+  it("supports FERPA scope explorer for auditor and admin roles", async () => {
+    const auditorLogin = await loginAs("auditor@example.edu");
+
+    const response = await request(app)
+      .get("/api/v1/audit/ferpa-scope?learnerId=usr_student_1&scope=advisor_visibility&enabled=false")
+      .set("Authorization", `Bearer ${auditorLogin.body.accessToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.records).toHaveLength(1);
+    expect(response.body.records[0].learnerId).toBe("usr_student_1");
+    expect(response.body.records[0].scopes.find((scope: { key: string; enabled: boolean }) => scope.key === "advisor_visibility")?.enabled).toBe(false);
+    expect(response.body.records[0].latestEvent.actorUserId).toBe("usr_student_1");
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const deniedResponse = await request(app)
+      .get("/api/v1/audit/ferpa-scope")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`);
+
+    expect(deniedResponse.status).toBe(403);
+    expect(deniedResponse.body.error.code).toBe("AUTH_FORBIDDEN");
   });
 });
