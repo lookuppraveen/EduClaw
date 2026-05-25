@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { prisma } from "../src/db/prisma.js";
 import { findUserByEmail } from "../src/repositories/prisma/user.repository.js";
 import { getSession, isRefreshTokenValid, saveSession } from "../src/repositories/prisma/session.repository.js";
 import { findCourseById, sharesCourseWithLearner } from "../src/repositories/prisma/course.repository.js";
-import { findLearnerState } from "../src/repositories/prisma/learner-state.repository.js";
+import { findLearnerState, updateMasteryFromCompletedTurn } from "../src/repositories/prisma/learner-state.repository.js";
 import { getConsentRecord, updateConsentRecord } from "../src/repositories/prisma/consent.repository.js";
 import { newId, sha256 } from "../src/common/crypto.js";
 
@@ -44,6 +45,58 @@ describe("Prisma repositories", () => {
     const state = await findLearnerState("usr_student_1");
     expect(state?.goals.length).toBeGreaterThan(0);
     expect(state?.mastery.length).toBeGreaterThan(0);
+  });
+
+  it("enforces core schema uniqueness for course and outcome identity", async () => {
+    await expect(prisma.course.create({
+      data: {
+        id: "crs_duplicate_math",
+        code: "MATH 1550",
+        title: "Duplicate Calculus",
+        term: "Fall 2026"
+      }
+    })).rejects.toMatchObject({ code: "P2002" });
+
+    await expect(prisma.outcome.create({
+      data: {
+        id: "out_duplicate_chain_rule",
+        courseId: "crs_math_1550",
+        code: "MATH-CR-1",
+        description: "Duplicate chain rule outcome"
+      }
+    })).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("updates learner mastery atomically without duplicate learner-outcome rows", async () => {
+    const first = await updateMasteryFromCompletedTurn({
+      learnerId: "usr_student_1",
+      courseId: "crs_math_1550",
+      turnId: "turn_integrity_1",
+      knowledgeGap: "chain rule composition",
+      confidence: 0.8,
+      validationStatus: "approved"
+    });
+    const second = await updateMasteryFromCompletedTurn({
+      learnerId: "usr_student_1",
+      courseId: "crs_math_1550",
+      turnId: "turn_integrity_2",
+      knowledgeGap: "chain rule composition",
+      confidence: 0.9,
+      validationStatus: "modified"
+    });
+
+    expect(first?.outcomeId).toBe("out_math_chain_rule");
+    expect(second?.outcomeId).toBe("out_math_chain_rule");
+
+    const rows = await prisma.learnerMastery.findMany({
+      where: {
+        learnerId: "usr_student_1",
+        outcomeId: "out_math_chain_rule"
+      }
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.evidence).toBe("Conversation turn turn_integrity_2");
   });
 
   it("updates consent and appends history atomically", async () => {

@@ -125,6 +125,7 @@ model Course {
   policies    ValidationPolicy[]
 
   @@index([code])
+  @@unique([code, term])
 }
 
 model Outcome {
@@ -138,6 +139,7 @@ model Outcome {
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@index([courseId])
+  @@unique([courseId, code])
 }
 
 model Material {
@@ -152,6 +154,7 @@ model Material {
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@index([courseId])
+  @@unique([courseId, title, url])
 }
 
 model Enrollment {
@@ -201,6 +204,7 @@ model LearnerMastery {
 
   @@index([learnerId])
   @@index([outcomeId])
+  @@unique([learnerId, outcomeId])
 }
 
 model ReflectionEntry {
@@ -244,6 +248,7 @@ model ConsentHistory {
 
   @@index([learnerId])
   @@index([actorUserId])
+  @@index([learnerId, createdAt])
 }
 
 model Conversation {
@@ -261,6 +266,7 @@ model Conversation {
 
   @@index([learnerId])
   @@index([courseId])
+  @@index([learnerId, courseId, createdAt])
 }
 
 model ConversationTurn {
@@ -300,6 +306,7 @@ model ConversationTurn {
   @@index([conversationId])
   @@index([learnerId])
   @@index([courseId])
+  @@index([learnerId, courseId, createdAt])
 }
 
 model AgentTrace {
@@ -317,6 +324,7 @@ model AgentTrace {
 
   @@index([turnId])
   @@index([agent])
+  @@unique([turnId, agent])
 }
 
 model ValidationPolicy {
@@ -341,6 +349,7 @@ model ValidationPolicy {
   @@index([courseId])
   @@index([assignmentId])
   @@index([status])
+  @@index([courseId, assignmentId, status])
 }
 
 model PolicyClause {
@@ -357,6 +366,7 @@ model PolicyClause {
   policy ValidationPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@index([policyId])
+  @@unique([policyId, rule])
 }
 
 model FlaggedTurn {

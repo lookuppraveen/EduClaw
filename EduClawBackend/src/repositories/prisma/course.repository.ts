@@ -1,6 +1,6 @@
 import { prisma } from "../../db/prisma.js";
 import type { Course, CourseEnrollment, Material, Outcome } from "../../types/courses.js";
-import type { UserRole } from "../../types/auth.js";
+import type { User, UserRole } from "../../types/auth.js";
 
 const mapCourse = (course: {
   id: string;
@@ -84,4 +84,29 @@ export const sharesCourseWithLearner = async (actorUserId: string, learnerId: st
   const actorCourseIds = actor.map((item: { courseId: string }) => item.courseId);
   const learner = await prisma.enrollment.findFirst({ where: { userId: learnerId, courseId: { in: actorCourseIds } } });
   return Boolean(learner);
+};
+
+export interface CourseRosterEntry {
+  role: CourseEnrollment["role"];
+  user: User;
+}
+
+export const listCourseRoster = async (courseId: string): Promise<CourseRosterEntry[]> => {
+  const enrollments = await prisma.enrollment.findMany({
+    where: { courseId },
+    include: { user: true },
+    orderBy: [{ role: "asc" }, { createdAt: "asc" }]
+  });
+
+  return enrollments
+    .filter((enrollment) => enrollment.user.deletedAt === null)
+    .map((enrollment) => ({
+      role: enrollment.role,
+      user: {
+        id: enrollment.user.id,
+        name: enrollment.user.name,
+        email: enrollment.user.email,
+        roles: [enrollment.user.role as UserRole]
+      }
+    }));
 };

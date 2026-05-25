@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../common/async-handler.js";
 import { HttpError } from "../../common/errors.js";
+import { renderPrometheusMetrics } from "../../common/metrics.js";
 import { createAuditLog, getAdminKpis, listAuditLogs, listIntegrationStatuses, updateIntegrationStatus } from "../../repositories/prisma/admin.repository.js";
 
 const integrationStatusSchema = z.object({
@@ -31,6 +32,11 @@ adminRouter.get("/kpis", asyncHandler(async (_req, res) => {
   const kpis = await getAdminKpis();
   return res.status(200).json({ kpis });
 }));
+
+adminRouter.get("/metrics", (_req, res) => {
+  res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  return res.status(200).send(renderPrometheusMetrics());
+});
 
 adminRouter.get("/integrations", asyncHandler(async (_req, res) => {
   const integrations = await listIntegrationStatuses();

@@ -1,6 +1,7 @@
 import { HttpError } from "../../../common/errors.js";
 import { newId } from "../../../common/crypto.js";
-import { hasCourseEnrollment, sharesCourseWithLearner } from "../../../repositories/prisma/course.repository.js";
+import { hasConsentScope } from "../../../repositories/prisma/consent.repository.js";
+import { hasCourseEnrollment, hasCourseEnrollmentRole } from "../../../repositories/prisma/course.repository.js";
 import { createFlaggedTurn } from "../../../repositories/prisma/flagged-turn.repository.js";
 import { updateMasteryFromCompletedTurn } from "../../../repositories/prisma/learner-state.repository.js";
 import { createAuditLog } from "../../../repositories/prisma/admin.repository.js";
@@ -27,7 +28,9 @@ export class ConversationService {
   async createConversation(actor: ActorContext, input: CreateConversationInput): Promise<Conversation> {
     const canCreateForSelf = actor.userId === input.learnerId;
     const canAdmin = actor.roles.includes("admin");
-    const canFaculty = actor.roles.includes("faculty") && (await sharesCourseWithLearner(actor.userId, input.learnerId));
+    const canFaculty = actor.roles.includes("faculty")
+      && (await hasCourseEnrollmentRole(actor.userId, input.courseId, ["faculty"]))
+      && (await hasCourseEnrollment(input.learnerId, input.courseId));
 
     if (!canCreateForSelf && !canAdmin && !canFaculty) {
       throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Cannot create conversation for this learner");
@@ -63,6 +66,7 @@ export class ConversationService {
   async listTurns(actor: ActorContext, conversationId: string): Promise<ConversationTurn[]> {
     const conversation = await this.getConversation(actor, conversationId);
     await this.assertConversationReadAccess(actor, conversation);
+    await this.assertPriorConversationConsent(actor, conversation.learnerId);
     return await this.repository.listTurnsByConversationId(conversationId);
   }
 
@@ -73,9 +77,15 @@ export class ConversationService {
       throw new HttpError(422, "CONVERSATION_COURSE_MISMATCH", "Turn courseId must match conversation courseId");
     }
 
-    if (actor.userId !== conversation.learnerId && !actor.roles.includes("admin") && !actor.roles.includes("faculty")) {
+    if (actor.userId !== conversation.learnerId && !actor.roles.includes("admin")) {
       throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Cannot create turn for this conversation");
     }
+
+    if (actor.roles.includes("faculty") && actor.userId !== conversation.learnerId) {
+      await this.assertFacultyCourseAccess(actor.userId, conversation.courseId);
+    }
+
+    await this.assertCourseContextConsent(conversation.learnerId);
 
     const orchestrated = this.orchestrator.run({
       message: input.message,
@@ -174,6 +184,7 @@ export class ConversationService {
 
     const conversation = await this.getConversation(actor, turn.conversationId);
     await this.assertConversationReadAccess(actor, conversation);
+    await this.assertPriorConversationConsent(actor, conversation.learnerId);
 
     const trace = await this.repository.getTurnTrace(turnId);
 
@@ -219,10 +230,38 @@ export class ConversationService {
       return;
     }
 
-    if (actor.roles.includes("faculty") && (await sharesCourseWithLearner(actor.userId, conversation.learnerId))) {
+    if (actor.roles.includes("faculty") && (await hasCourseEnrollmentRole(actor.userId, conversation.courseId, ["faculty"]))) {
       return;
     }
 
     throw new HttpError(403, "CONVERSATION_FORBIDDEN", "No access to this conversation");
+  }
+
+  private async assertFacultyCourseAccess(actorUserId: string, courseId: string): Promise<void> {
+    if (await hasCourseEnrollmentRole(actorUserId, courseId, ["faculty"])) {
+      return;
+    }
+
+    throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Faculty user is not assigned to this course context");
+  }
+
+  private async assertCourseContextConsent(learnerId: string): Promise<void> {
+    if (await hasConsentScope(learnerId, "course_context")) {
+      return;
+    }
+
+    throw new HttpError(403, "CONSENT_REQUIRED", "Course context consent is required");
+  }
+
+  private async assertPriorConversationConsent(actor: ActorContext, learnerId: string): Promise<void> {
+    if (actor.userId === learnerId || actor.roles.includes("admin") || actor.roles.includes("auditor")) {
+      return;
+    }
+
+    if (await hasConsentScope(learnerId, "prior_conversations")) {
+      return;
+    }
+
+    throw new HttpError(403, "CONSENT_REQUIRED", "Prior conversation consent is required");
   }
 }

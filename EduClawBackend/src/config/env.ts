@@ -18,7 +18,17 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
   IDEMPOTENCY_TTL_MS: z.coerce.number().int().positive().default(600_000),
-  LOG_LEVEL: z.enum(["debug", "info", "warn", "error", "silent"]).default("info")
+  LOG_LEVEL: z.enum(["debug", "info", "warn", "error", "silent"]).default("info"),
+  AUTH_ALLOW_MOCK_SSO: z.enum(["true", "false"]).optional().transform((value) => value === "true")
 });
 
-export const env = envSchema.parse(process.env);
+const parsedEnv = envSchema.parse(process.env);
+
+export const isMockSsoAllowed = (nodeEnv: string, configured: boolean): boolean => {
+  return nodeEnv !== "production" && configured;
+};
+
+export const env = {
+  ...parsedEnv,
+  AUTH_ALLOW_MOCK_SSO: isMockSsoAllowed(parsedEnv.NODE_ENV, parsedEnv.AUTH_ALLOW_MOCK_SSO)
+};

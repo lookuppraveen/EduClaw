@@ -4,15 +4,15 @@ import { env } from "../../config/env.js";
 import { HttpError } from "../../common/errors.js";
 import { newId, sha256 } from "../../common/crypto.js";
 import { asyncHandler } from "../../common/async-handler.js";
-import { findFirstUser, findUserByEmail, findUserById } from "../../repositories/prisma/user.repository.js";
+import { findUserByEmail, findUserById } from "../../repositories/prisma/user.repository.js";
 import { getSession, isRefreshTokenValid, revokeSession, saveSession } from "../../repositories/prisma/session.repository.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./jwt.js";
-import type { JwtAccessPayload, User } from "../../types/auth.js";
+import type { JwtAccessPayload, JwtRefreshPayload, User } from "../../types/auth.js";
 
 const loginSchema = z.object({
   provider: z.enum(["okta", "azure-ad", "shibboleth"]),
   idToken: z.string().min(1),
-  email: z.string().email().optional(),
+  email: z.string().email(),
   device: z.string().min(1).optional()
 });
 
@@ -30,6 +30,14 @@ const mapUser = (user: User) => ({
   email: user.email,
   roles: user.roles
 });
+
+const verifyRefreshTokenOrThrow = (refreshToken: string): JwtRefreshPayload => {
+  try {
+    return verifyRefreshToken(refreshToken);
+  } catch {
+    throw new HttpError(401, "AUTH_REFRESH_INVALID", "Refresh token is invalid");
+  }
+};
 
 const issueTokens = async (userId: string, roles: JwtAccessPayload["roles"]) => {
   const refreshJti = newId();
@@ -53,11 +61,12 @@ const issueTokens = async (userId: string, roles: JwtAccessPayload["roles"]) => 
 export const authRouter = Router();
 
 authRouter.post("/login", asyncHandler(async (req, res) => {
+  if (!env.AUTH_ALLOW_MOCK_SSO) {
+    throw new HttpError(503, "AUTH_PROVIDER_UNCONFIGURED", "Mock SSO login is disabled for this environment");
+  }
+
   const body = loginSchema.parse(req.body);
-  const requestedEmail = body.email;
-  const user = requestedEmail
-    ? await findUserByEmail(requestedEmail)
-    : await findFirstUser();
+  const user = await findUserByEmail(body.email);
 
   if (!user) {
     throw new HttpError(401, "AUTH_INVALID_CREDENTIALS", "Invalid login credentials");
@@ -72,7 +81,7 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
 
 authRouter.post("/refresh", asyncHandler(async (req, res) => {
   const { refreshToken } = refreshSchema.parse(req.body);
-  const payload = verifyRefreshToken(refreshToken);
+  const payload = verifyRefreshTokenOrThrow(refreshToken);
 
   const session = await getSession(payload.jti);
   const isValid = await isRefreshTokenValid(payload.jti, refreshToken);
@@ -96,7 +105,7 @@ authRouter.post("/refresh", asyncHandler(async (req, res) => {
 
 authRouter.post("/logout", asyncHandler(async (req, res) => {
   const { refreshToken } = logoutSchema.parse(req.body);
-  const payload = verifyRefreshToken(refreshToken);
+  const payload = verifyRefreshTokenOrThrow(refreshToken);
   await revokeSession(payload.jti);
   return res.status(200).json({ success: true });
 }));

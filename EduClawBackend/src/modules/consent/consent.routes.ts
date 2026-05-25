@@ -6,14 +6,37 @@ import { getConsentRecord, listConsentEvents, updateConsentRecord } from "../../
 import { createAuditLog } from "../../repositories/prisma/admin.repository.js";
 import { assertConsentWriteAccess } from "../learner-state/abac.js";
 
+const consentScopeKeys = ["course_context", "prior_conversations", "advisor_visibility", "third_party_tools"] as const;
+
 const consentScopeSchema = z.object({
-  key: z.enum(["course_context", "prior_conversations", "advisor_visibility", "third_party_tools"]),
+  key: z.enum(consentScopeKeys),
   enabled: z.boolean()
 });
 
 const updateConsentSchema = z.object({
-  scopes: z.array(consentScopeSchema).min(1),
+  scopes: z.array(consentScopeSchema).length(consentScopeKeys.length),
   reason: z.string().min(1).max(500).optional()
+}).superRefine((value, context) => {
+  const keys = value.scopes.map((scope) => scope.key);
+  const uniqueKeys = new Set(keys);
+
+  if (uniqueKeys.size !== keys.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["scopes"],
+      message: "Consent scopes must not contain duplicate keys"
+    });
+  }
+
+  for (const key of consentScopeKeys) {
+    if (!uniqueKeys.has(key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scopes"],
+        message: `Consent scope '${key}' is required`
+      });
+    }
+  }
 });
 
 export const consentRouter = Router();

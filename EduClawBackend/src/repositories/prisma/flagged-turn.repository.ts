@@ -116,10 +116,30 @@ export const findFlaggedTurnById = async (flagId: string): Promise<FlaggedTurnDe
   return mapFlaggedTurnDetail(row);
 };
 
-export const createReviewDecision = async (input: ReviewDecisionCreateInput): Promise<ReviewDecision> => {
+export type CreateReviewDecisionResult =
+  | { status: "created"; decision: ReviewDecision }
+  | { status: "not_found" }
+  | { status: "already_resolved" };
+
+export const createReviewDecision = async (input: ReviewDecisionCreateInput): Promise<CreateReviewDecisionResult> => {
   const decision = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const flag = await tx.flaggedTurn.findUnique({ where: { id: input.flagId } });
-    if (!flag) return null;
+    if (!flag) return { status: "not_found" as const };
+
+    const resolved = await tx.flaggedTurn.updateMany({
+      where: {
+        id: flag.id,
+        status: "pending"
+      },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date()
+      }
+    });
+
+    if (resolved.count === 0) {
+      return { status: "already_resolved" as const };
+    }
 
     const created = await tx.reviewDecision.create({
       data: {
@@ -134,20 +154,8 @@ export const createReviewDecision = async (input: ReviewDecisionCreateInput): Pr
       }
     });
 
-    await tx.flaggedTurn.update({
-      where: { id: flag.id },
-      data: {
-        status: "resolved",
-        resolvedAt: new Date()
-      }
-    });
-
-    return created;
+    return { status: "created" as const, decision: mapReviewDecision(created) };
   });
 
-  if (!decision) {
-    throw new Error("Flagged turn not found");
-  }
-
-  return mapReviewDecision(decision);
+  return decision;
 };

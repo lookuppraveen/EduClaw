@@ -13,7 +13,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:dbpush:test": "node scripts/with-test-env.mjs prisma db push --skip-generate",
+    "prisma:dbpush:test": "node scripts/with-test-env.mjs prisma db push --skip-generate --accept-data-loss",
     "prisma:seed:test": "node scripts/with-test-env.mjs tsx prisma/seed.ts",
     "test:db:prepare": "npm run prisma:dbpush:test && npm run prisma:seed:test"
   },

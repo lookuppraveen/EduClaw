@@ -8,6 +8,8 @@ import { traceContextMiddleware } from "./common/trace-context.js";
 import { requestLoggerMiddleware } from "./common/request-logger.js";
 import { rateLimitMiddleware } from "./common/rate-limit-middleware.js";
 import { idempotencyMiddleware } from "./common/idempotency-middleware.js";
+import { metricsMiddleware } from "./common/metrics.js";
+import { securityHeadersMiddleware } from "./common/security-headers-middleware.js";
 import { errorMiddleware } from "./common/error-middleware.js";
 import { requireRoles } from "./modules/auth/rbac.middleware.js";
 import { coursesRouter } from "./modules/courses/courses.routes.js";
@@ -19,19 +21,24 @@ import { policiesRouter } from "./modules/policies/policies.routes.js";
 import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
 import { auditRouter } from "./modules/audit/audit.routes.js";
+import { usersRouter } from "./modules/users/users.routes.js";
 
 export const app = express();
 
+app.disable("x-powered-by");
 app.use(cors());
 app.use(express.json());
+app.use(securityHeadersMiddleware);
 app.use(requestContextMiddleware);
 app.use(traceContextMiddleware);
 app.use(requestLoggerMiddleware);
+app.use(metricsMiddleware);
 app.use(rateLimitMiddleware);
 
 app.use("/api/v1", healthRouter);
 app.use("/api/v1/auth", authRouter);
 app.get("/api/v1/auth/me", requireAuth, meHandler);
+app.use("/api/v1/users", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), idempotencyMiddleware, usersRouter);
 app.use("/api/v1/courses", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), coursesRouter);
 app.use("/api/v1/learners", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), idempotencyMiddleware, learnerStateRouter);
 app.use("/api/v1/consents", requireAuth, requireRoles(["student", "faculty", "advisor", "admin", "auditor"]), idempotencyMiddleware, consentRouter);

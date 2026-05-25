@@ -184,26 +184,23 @@ export const updateMasteryFromCompletedTurn = async (input: {
       create: { learnerId: input.learnerId }
     });
 
-    const existing = await tx.learnerMastery.findFirst({
-      where: { learnerId: input.learnerId, outcomeId },
-      orderBy: { updatedAt: "desc" }
-    });
-
     const evidence = `Conversation turn ${input.turnId}`;
 
-    if (existing) {
-      return tx.learnerMastery.update({
-        where: { id: existing.id },
-        data: {
-          score: clampMasteryScore(Math.max(existing.score + delta, confidenceAdjustedScore)),
-          evidence,
-          updatedAt: now
+    return tx.learnerMastery.upsert({
+      where: {
+        learnerId_outcomeId: {
+          learnerId: input.learnerId,
+          outcomeId
         }
-      });
-    }
-
-    return tx.learnerMastery.create({
-      data: {
+      },
+      update: {
+        score: {
+          increment: delta
+        },
+        evidence,
+        updatedAt: now
+      },
+      create: {
         id: newId(),
         learnerId: input.learnerId,
         outcomeId,
@@ -213,6 +210,22 @@ export const updateMasteryFromCompletedTurn = async (input: {
       }
     });
   });
+
+  if (mastery.score < confidenceAdjustedScore || mastery.score > 1) {
+    const normalized = await prisma.learnerMastery.update({
+      where: { id: mastery.id },
+      data: {
+        score: clampMasteryScore(Math.max(mastery.score, confidenceAdjustedScore))
+      }
+    });
+
+    return {
+      outcomeId: normalized.outcomeId,
+      score: normalized.score,
+      evidence: normalized.evidence,
+      updatedAt: normalized.updatedAt.toISOString()
+    };
+  }
 
   return {
     outcomeId: mastery.outcomeId,

@@ -59,12 +59,26 @@ export class ReviewService {
 
   async createDecision(actor: ReviewActorContext, flagId: string, input: ReviewDecisionInput): Promise<ReviewDecision> {
     const flag = await this.getFlaggedReview(actor, flagId);
-    return await createReviewDecision({
+    if (flag.status !== "pending") {
+      throw new HttpError(409, "FLAGGED_TURN_ALREADY_RESOLVED", "Flagged turn has already been resolved");
+    }
+
+    const result = await createReviewDecision({
       flagId: flag.id,
       reviewerId: actor.userId,
       decision: input.decision,
       note: input.note
     });
+
+    if (result.status === "not_found") {
+      throw new HttpError(404, "FLAGGED_TURN_NOT_FOUND", "Flagged turn not found");
+    }
+
+    if (result.status === "already_resolved") {
+      throw new HttpError(409, "FLAGGED_TURN_ALREADY_RESOLVED", "Flagged turn has already been resolved");
+    }
+
+    return result.decision;
   }
 
   private async assertReviewRole(actor: ReviewActorContext): Promise<void> {
