@@ -1,0 +1,86 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - "EduClawBackend/**"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "EduClawBackend/**"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  verify:
+    name: Verify backend
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: educlaw_test
+          POSTGRES_USER: educlaw
+          POSTGRES_PASSWORD: educlaw
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U educlaw -d educlaw_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: EduClawBackend
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://educlaw:educlaw@localhost:5432/educlaw_test
+      JWT_ACCESS_SECRET: ci-access-secret-at-least-thirty-two-chars
+      JWT_REFRESH_SECRET: ci-refresh-secret-at-least-thirty-two-chars
+      AUTH_ALLOW_MOCK_SSO: "true"
+      LOG_LEVEL: silent
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: EduClawBackend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm run security:audit
+
+      - name: Generate SBOM
+        run: npm run security:sbom > sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: educlaw-backend-sbom
+          path: EduClawBackend/sbom.cdx.json
