@@ -11,3 +11,8 @@ export interface FerpaScopeRecord {
     createdAt: string;
   } | null;
 }
+
+export interface FerpaScopeRecordPage {
+  records: FerpaScopeRecord[];
+  nextCursor: string | null;
+}

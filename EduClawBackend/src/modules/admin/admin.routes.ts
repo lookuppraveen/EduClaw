@@ -33,10 +33,10 @@ adminRouter.get("/kpis", asyncHandler(async (_req, res) => {
   return res.status(200).json({ kpis });
 }));
 
-adminRouter.get("/metrics", (_req, res) => {
+adminRouter.get("/metrics", asyncHandler(async (_req, res) => {
   res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-  return res.status(200).send(renderPrometheusMetrics());
-});
+  return res.status(200).send(await renderPrometheusMetrics());
+}));
 
 adminRouter.get("/integrations", asyncHandler(async (_req, res) => {
   const integrations = await listIntegrationStatuses();

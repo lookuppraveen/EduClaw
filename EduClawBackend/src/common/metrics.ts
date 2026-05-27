@@ -1,19 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
-
-interface HttpMetric {
-  count: number;
-  sumSeconds: number;
-  buckets: number[];
-}
+import { logger } from "./logger.js";
+import { listHttpMetrics, observeHttpMetric, resetHttpMetricAggregates } from "../repositories/prisma/metrics.repository.js";
 
 const bucketsSeconds = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
-const httpMetrics = new Map<string, HttpMetric>();
 let metricsStartedAt = Date.now();
 
 const statusClass = (statusCode: number): string => `${Math.floor(statusCode / 100)}xx`;
-
-const metricKey = (method: string, route: string, status: string): string =>
-  `${method} ${route} ${status}`;
 
 const labelValue = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
@@ -27,27 +19,13 @@ const routePattern = (req: Request): string => {
   return req.originalUrl.split("?")[0] ?? req.path;
 };
 
-const observeHttpRequest = (method: string, route: string, status: string, durationSeconds: number): void => {
-  const key = metricKey(method, route, status);
-  const metric = httpMetrics.get(key) ?? {
-    count: 0,
-    sumSeconds: 0,
-    buckets: bucketsSeconds.map(() => 0)
-  };
-
-  metric.count += 1;
-  metric.sumSeconds += durationSeconds;
-  for (const [index, bucket] of bucketsSeconds.entries()) {
-    if (durationSeconds <= bucket) {
-      metric.buckets[index] += 1;
-    }
-  }
-
-  httpMetrics.set(key, metric);
+const bucketIndexForDuration = (durationSeconds: number): number | null => {
+  const index = bucketsSeconds.findIndex((bucket) => durationSeconds <= bucket);
+  return index === -1 ? null : index;
 };
 
-export const resetHttpMetrics = (): void => {
-  httpMetrics.clear();
+export const resetHttpMetrics = async (): Promise<void> => {
+  await resetHttpMetricAggregates();
   metricsStartedAt = Date.now();
 };
 
@@ -55,18 +33,26 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
   const startedAt = Date.now();
 
   res.on("finish", () => {
-    observeHttpRequest(
-      req.method,
-      routePattern(req),
-      statusClass(res.statusCode),
-      (Date.now() - startedAt) / 1000
-    );
+    const durationSeconds = (Date.now() - startedAt) / 1000;
+    void observeHttpMetric({
+      method: req.method,
+      route: routePattern(req),
+      statusClass: statusClass(res.statusCode),
+      durationSeconds,
+      bucketIndex: bucketIndexForDuration(durationSeconds),
+      bucketCount: bucketsSeconds.length
+    }).catch((error: unknown) => {
+      logger.warn("Failed to persist HTTP metric", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
   });
 
   next();
 };
 
-export const renderPrometheusMetrics = (): string => {
+export const renderPrometheusMetrics = async (): Promise<string> => {
+  const httpMetrics = await listHttpMetrics();
   const lines = [
     "# HELP educlaw_process_uptime_seconds Process uptime in seconds.",
     "# TYPE educlaw_process_uptime_seconds gauge",
@@ -77,14 +63,13 @@ export const renderPrometheusMetrics = (): string => {
     "# TYPE educlaw_http_request_duration_seconds histogram"
   ];
 
-  for (const [key, metric] of [...httpMetrics.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const [method, route, status] = key.split(" ");
-    const labels = `method="${labelValue(method)}",route="${labelValue(route)}",status_class="${labelValue(status)}"`;
+  for (const metric of httpMetrics) {
+    const labels = `method="${labelValue(metric.method)}",route="${labelValue(metric.route)}",status_class="${labelValue(metric.statusClass)}"`;
 
     lines.push(`educlaw_http_requests_total{${labels}} ${metric.count}`);
 
     for (const [index, bucket] of bucketsSeconds.entries()) {
-      lines.push(`educlaw_http_request_duration_seconds_bucket{${labels},le="${bucket}"} ${metric.buckets[index]}`);
+      lines.push(`educlaw_http_request_duration_seconds_bucket{${labels},le="${bucket}"} ${metric.bucketCounts[index] ?? 0}`);
     }
     lines.push(`educlaw_http_request_duration_seconds_bucket{${labels},le="+Inf"} ${metric.count}`);
     lines.push(`educlaw_http_request_duration_seconds_sum{${labels}} ${metric.sumSeconds.toFixed(6)}`);

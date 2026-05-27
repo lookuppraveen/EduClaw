@@ -46,3 +46,8 @@ export interface ReviewDecisionCreateInput {
 export interface FlaggedTurnDetail extends FlaggedTurn {
   decisions: ReviewDecision[];
 }
+
+export interface FlaggedTurnListPage {
+  flagged: FlaggedTurn[];
+  nextCursor: string | null;
+}

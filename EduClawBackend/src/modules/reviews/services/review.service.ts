@@ -6,7 +6,7 @@ import {
   listFlaggedTurns
 } from "../../../repositories/prisma/flagged-turn.repository.js";
 import type { UserRole } from "../../../types/auth.js";
-import type { FlaggedTurn, FlaggedTurnDetail, FlaggedTurnStatus, ReviewDecision, ReviewDecisionType } from "../../../types/reviews.js";
+import type { FlaggedTurnDetail, FlaggedTurnListPage, FlaggedTurnStatus, ReviewDecision, ReviewDecisionType } from "../../../types/reviews.js";
 
 export interface ReviewActorContext {
   userId: string;
@@ -16,6 +16,8 @@ export interface ReviewActorContext {
 export interface FlaggedReviewFilters {
   courseId?: string;
   status?: FlaggedTurnStatus;
+  limit?: number;
+  cursor?: string;
 }
 
 export interface ReviewDecisionInput {
@@ -26,24 +28,38 @@ export interface ReviewDecisionInput {
 const hasRole = (roles: UserRole[], role: UserRole): boolean => roles.includes(role);
 
 export class ReviewService {
-  async listFlaggedReviews(actor: ReviewActorContext, filters: FlaggedReviewFilters): Promise<FlaggedTurn[]> {
+  async listFlaggedReviews(actor: ReviewActorContext, filters: FlaggedReviewFilters): Promise<FlaggedTurnListPage> {
     await this.assertReviewRole(actor);
 
     if (filters.courseId) {
       await this.assertCourseReviewAccess(actor, filters.courseId);
-      return await listFlaggedTurns({ courseId: filters.courseId, status: filters.status });
+      return await listFlaggedTurns({
+        courseId: filters.courseId,
+        status: filters.status,
+        limit: filters.limit,
+        cursor: filters.cursor
+      });
     }
 
     if (hasRole(actor.roles, "admin")) {
-      return await listFlaggedTurns({ status: filters.status });
+      return await listFlaggedTurns({
+        status: filters.status,
+        limit: filters.limit,
+        cursor: filters.cursor
+      });
     }
 
     const courseIds = await listCourseIdsForEnrollmentRole(actor.userId, ["faculty"]);
     if (courseIds.length === 0) {
-      return [];
+      return { flagged: [], nextCursor: null };
     }
 
-    return await listFlaggedTurns({ courseIds, status: filters.status });
+    return await listFlaggedTurns({
+      courseIds,
+      status: filters.status,
+      limit: filters.limit,
+      cursor: filters.cursor
+    });
   }
 
   async getFlaggedReview(actor: ReviewActorContext, flagId: string): Promise<FlaggedTurnDetail> {

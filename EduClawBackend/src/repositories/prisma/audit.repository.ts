@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma.js";
-import type { FerpaScopeRecord } from "../../types/audit.js";
+import type { FerpaScopeRecordPage } from "../../types/audit.js";
 import type { ConsentScope, ConsentScopeKey } from "../../types/learner-state.js";
 
 const toScopes = (consent: {
@@ -18,9 +18,12 @@ export interface FerpaScopeFilters {
   learnerId?: string;
   scope?: ConsentScopeKey;
   enabled?: boolean;
+  limit?: number;
+  cursor?: string;
 }
 
-export const listFerpaScopeRecords = async (filters: FerpaScopeFilters): Promise<FerpaScopeRecord[]> => {
+export const listFerpaScopeRecords = async (filters: FerpaScopeFilters): Promise<FerpaScopeRecordPage> => {
+  const limit = filters.limit ?? 50;
   const rows = await prisma.consent.findMany({
     where: {
       ...(filters.learnerId ? { learnerId: filters.learnerId } : {}),
@@ -35,10 +38,13 @@ export const listFerpaScopeRecords = async (filters: FerpaScopeFilters): Promise
         take: 1
       }
     },
-    orderBy: { learnerId: "asc" }
+    orderBy: { learnerId: "asc" },
+    take: limit + 1,
+    ...(filters.cursor ? { cursor: { learnerId: filters.cursor }, skip: 1 } : {})
   });
 
-  return rows
+  const records = rows
+    .slice(0, limit)
     .map((row) => ({
       learnerId: row.learnerId,
       scopes: toScopes(row),
@@ -59,4 +65,9 @@ export const listFerpaScopeRecords = async (filters: FerpaScopeFilters): Promise
 
       return record.scopes.some((scope) => scope.key === filters.scope);
     });
+
+  return {
+    records,
+    nextCursor: rows.length > limit ? records.at(-1)?.learnerId ?? null : null
+  };
 };

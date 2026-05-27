@@ -1177,12 +1177,43 @@ describe("EduClaw backend APIs", () => {
     const flagged = await findFlaggedTurnByTurnId(turnResponse.body.turn.id as string);
     expect(flagged?.status).toBe("pending");
 
+    const secondTurnResponse = await request(app)
+      .post(`/api/v1/conversations/${conversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "I still need the direct answer",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_review_queue",
+        selectedChip: null
+      });
+
+    expect(secondTurnResponse.status).toBe(201);
+    const secondFlagged = await findFlaggedTurnByTurnId(secondTurnResponse.body.turn.id as string);
+    expect(secondFlagged?.status).toBe("pending");
+
     const listResponse = await request(app)
       .get("/api/v1/reviews/flagged?courseId=crs_math_1550&status=pending")
       .set("Authorization", `Bearer ${facultyToken}`);
 
     expect(listResponse.status).toBe(200);
     expect(listResponse.body.flagged.some((item: { id: string }) => item.id === flagged?.id)).toBe(true);
+    expect(listResponse.body.page.limit).toBe(50);
+
+    const firstPageResponse = await request(app)
+      .get("/api/v1/reviews/flagged?courseId=crs_math_1550&status=pending&limit=1")
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(firstPageResponse.status).toBe(200);
+    expect(firstPageResponse.body.flagged).toHaveLength(1);
+    expect(firstPageResponse.body.page.nextCursor).toBeTypeOf("string");
+
+    const secondPageResponse = await request(app)
+      .get(`/api/v1/reviews/flagged?courseId=crs_math_1550&status=pending&limit=1&cursor=${firstPageResponse.body.page.nextCursor}`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(secondPageResponse.status).toBe(200);
+    expect(secondPageResponse.body.flagged).toHaveLength(1);
+    expect(secondPageResponse.body.flagged[0].id).not.toBe(firstPageResponse.body.flagged[0].id);
 
     const detailResponse = await request(app)
       .get(`/api/v1/reviews/flagged/${flagged?.id}`)
@@ -1511,6 +1542,23 @@ describe("EduClaw backend APIs", () => {
     expect(response.body.records[0].learnerId).toBe("usr_student_1");
     expect(response.body.records[0].scopes.find((scope: { key: string; enabled: boolean }) => scope.key === "advisor_visibility")?.enabled).toBe(false);
     expect(response.body.records[0].latestEvent.actorUserId).toBe("usr_student_1");
+    expect(response.body.page.limit).toBe(50);
+
+    const firstPage = await request(app)
+      .get("/api/v1/audit/ferpa-scope?limit=1")
+      .set("Authorization", `Bearer ${auditorLogin.body.accessToken}`);
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.records).toHaveLength(1);
+    expect(firstPage.body.page.nextCursor).toBeTypeOf("string");
+
+    const secondPage = await request(app)
+      .get(`/api/v1/audit/ferpa-scope?limit=1&cursor=${firstPage.body.page.nextCursor}`)
+      .set("Authorization", `Bearer ${auditorLogin.body.accessToken}`);
+
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.records).toHaveLength(1);
+    expect(secondPage.body.records[0].learnerId).not.toBe(firstPage.body.records[0].learnerId);
 
     const studentLogin = await loginAs("maya@example.edu");
     const deniedResponse = await request(app)

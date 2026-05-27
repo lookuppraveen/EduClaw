@@ -7,12 +7,13 @@ import { asyncHandler } from "../../common/async-handler.js";
 import { findUserByEmail, findUserById } from "../../repositories/prisma/user.repository.js";
 import { getSession, isRefreshTokenValid, revokeSession, saveSession } from "../../repositories/prisma/session.repository.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./jwt.js";
+import { verifyInstitutionSsoIdToken } from "./sso.service.js";
 import type { JwtAccessPayload, JwtRefreshPayload, User } from "../../types/auth.js";
 
 const loginSchema = z.object({
   provider: z.enum(["okta", "azure-ad", "shibboleth"]),
   idToken: z.string().min(1),
-  email: z.string().email(),
+  email: z.string().email().optional(),
   device: z.string().min(1).optional()
 });
 
@@ -61,12 +62,23 @@ const issueTokens = async (userId: string, roles: JwtAccessPayload["roles"]) => 
 export const authRouter = Router();
 
 authRouter.post("/login", asyncHandler(async (req, res) => {
-  if (!env.AUTH_ALLOW_MOCK_SSO) {
-    throw new HttpError(503, "AUTH_PROVIDER_UNCONFIGURED", "Mock SSO login is disabled for this environment");
+  const body = loginSchema.parse(req.body);
+  const email = env.AUTH_ALLOW_MOCK_SSO
+    ? body.email
+    : verifyInstitutionSsoIdToken(
+        { provider: body.provider, idToken: body.idToken },
+        {
+          issuer: env.SSO_ISSUER,
+          audience: env.SSO_AUDIENCE,
+          publicKey: env.SSO_PUBLIC_KEY
+        }
+      ).email;
+
+  if (!email) {
+    throw new HttpError(400, "VALIDATION_ERROR", "Mock SSO login requires an explicit email");
   }
 
-  const body = loginSchema.parse(req.body);
-  const user = await findUserByEmail(body.email);
+  const user = await findUserByEmail(email);
 
   if (!user) {
     throw new HttpError(401, "AUTH_INVALID_CREDENTIALS", "Invalid login credentials");

@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 const prisma = new PrismaClient();
 
 export const seedDatabase = async (client: PrismaClient): Promise<void> => {
+  await client.httpMetric.deleteMany();
+  await client.rateLimitBucket.deleteMany();
+  await client.idempotencyRecord.deleteMany();
   await client.auditLog.deleteMany();
   await client.integrationStatus.deleteMany();
   await client.reviewDecision.deleteMany();

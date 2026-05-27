@@ -2,15 +2,13 @@ import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.js";
 import { HttpError } from "./errors.js";
+import {
+  deleteExpiredIdempotencyRecords,
+  getIdempotencyRecord,
+  resetIdempotencyRecords,
+  saveIdempotencyRecord
+} from "../repositories/prisma/idempotency.repository.js";
 
-interface IdempotencyEntry {
-  bodyHash: string;
-  expiresAt: number;
-  statusCode: number;
-  responseBody: unknown;
-}
-
-const idempotencyStore = new Map<string, IdempotencyEntry>();
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const protectedPathPrefixes = [
   "/api/v1/consents",
@@ -38,30 +36,27 @@ const stableStringify = (value: unknown): string => {
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-const cleanupExpiredEntries = (now: number): void => {
-  for (const [key, entry] of idempotencyStore.entries()) {
-    if (entry.expiresAt <= now) {
-      idempotencyStore.delete(key);
-    }
-  }
-};
-
 const shouldProtect = (req: Request): boolean => {
   const path = req.originalUrl.split("?")[0] ?? req.path;
   return unsafeMethods.has(req.method) && protectedPathPrefixes.some((prefix) => path.startsWith(prefix));
 };
 
-const buildStoreKey = (req: Request, idempotencyKey: string): string => {
+const buildStoreKey = (req: Request, idempotencyKey: string) => {
   const principal = req.authUser?.id ?? sha256(req.header("authorization") ?? req.ip ?? "anonymous");
   const path = req.originalUrl.split("?")[0] ?? req.path;
-  return `${principal}:${req.method}:${path}:${idempotencyKey}`;
+  return {
+    principal,
+    method: req.method,
+    path,
+    idempotencyKey
+  };
 };
 
-export const resetIdempotencyState = (): void => {
-  idempotencyStore.clear();
+export const resetIdempotencyState = async (): Promise<void> => {
+  await resetIdempotencyRecords();
 };
 
-export const idempotencyMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+export const idempotencyMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (!shouldProtect(req)) {
     next();
     return;
@@ -73,37 +68,45 @@ export const idempotencyMiddleware = (req: Request, res: Response, next: NextFun
     return;
   }
 
-  const now = Date.now();
-  cleanupExpiredEntries(now);
+  try {
+    const now = new Date();
+    await deleteExpiredIdempotencyRecords(now);
 
-  const storeKey = buildStoreKey(req, idempotencyKey);
-  const bodyHash = sha256(stableStringify(req.body ?? null));
-  const existing = idempotencyStore.get(storeKey);
+    const storeKey = buildStoreKey(req, idempotencyKey);
+    const bodyHash = sha256(stableStringify(req.body ?? null));
+    const existing = await getIdempotencyRecord(storeKey);
 
-  if (existing) {
-    if (existing.bodyHash !== bodyHash) {
-      next(new HttpError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request body"));
+    if (existing) {
+      if (existing.bodyHash !== bodyHash) {
+        next(new HttpError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request body"));
+        return;
+      }
+
+      res.setHeader("Idempotency-Replayed", "true");
+      res.status(existing.statusCode).json(existing.responseBody);
       return;
     }
 
-    res.setHeader("Idempotency-Replayed", "true");
-    res.status(existing.statusCode).json(existing.responseBody);
-    return;
+    const originalJson = res.json.bind(res);
+    res.json = (body: unknown): Response => {
+      if (res.statusCode < 500) {
+        void saveIdempotencyRecord({
+          ...storeKey,
+          bodyHash,
+          expiresAt: new Date(Date.now() + env.IDEMPOTENCY_TTL_MS),
+          statusCode: res.statusCode,
+          responseBody: body
+        })
+          .then(() => originalJson(body))
+          .catch(next);
+        return res;
+      }
+
+      return originalJson(body);
+    };
+
+    next();
+  } catch (error) {
+    next(error);
   }
-
-  const originalJson = res.json.bind(res);
-  res.json = (body: unknown): Response => {
-    if (res.statusCode < 500) {
-      idempotencyStore.set(storeKey, {
-        bodyHash,
-        expiresAt: Date.now() + env.IDEMPOTENCY_TTL_MS,
-        statusCode: res.statusCode,
-        responseBody: body
-      });
-    }
-
-    return originalJson(body);
-  };
-
-  next();
 };

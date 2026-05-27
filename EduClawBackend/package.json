@@ -15,7 +15,10 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:dbpush:test": "node scripts/with-test-env.mjs prisma db push --skip-generate --accept-data-loss",
     "prisma:seed:test": "node scripts/with-test-env.mjs tsx prisma/seed.ts",
-    "test:db:prepare": "npm run prisma:dbpush:test && npm run prisma:seed:test"
+    "test:db:prepare": "npm run prisma:dbpush:test && npm run prisma:seed:test",
+    "security:audit": "npm audit --omit=dev --audit-level=high",
+    "security:audit:all": "npm audit --audit-level=moderate",
+    "security:sbom": "npm sbom --package-lock-only --sbom-format cyclonedx --sbom-type application"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

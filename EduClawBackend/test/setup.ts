@@ -15,8 +15,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  resetIdempotencyState();
-  resetHttpMetrics();
-  resetRateLimitState();
+  await resetIdempotencyState();
+  await resetHttpMetrics();
+  await resetRateLimitState();
   await seedDatabase(prisma);
 });

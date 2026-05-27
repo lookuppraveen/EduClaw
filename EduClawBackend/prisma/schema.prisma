@@ -440,3 +440,43 @@ model AuditLog {
   @@index([targetType])
   @@index([createdAt])
 }
+
+model IdempotencyRecord {
+  id             String   @id
+  principal      String
+  method         String
+  path           String
+  idempotencyKey String
+  bodyHash       String
+  statusCode     Int
+  responseBody   Json
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([principal, method, path, idempotencyKey])
+  @@index([expiresAt])
+}
+
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
+}
+
+model HttpMetric {
+  id          String   @id
+  method      String
+  route       String
+  statusClass String
+  count       Int
+  sumSeconds  Float
+  bucketCounts Int[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([method, route, statusClass])
+}

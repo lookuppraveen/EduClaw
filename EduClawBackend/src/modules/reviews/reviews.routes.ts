@@ -7,7 +7,9 @@ import { ReviewService } from "./services/review.service.js";
 
 const listQuerySchema = z.object({
   courseId: z.string().min(1).optional(),
-  status: z.enum(["pending", "resolved"]).optional()
+  status: z.enum(["pending", "resolved"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  cursor: z.string().min(1).optional()
 });
 
 const decisionSchema = z.object({
@@ -33,12 +35,18 @@ reviewsRouter.get("/flagged", asyncHandler(async (req, res) => {
   }
 
   const query = listQuerySchema.parse(req.query);
-  const flagged = await service.listFlaggedReviews(
+  const page = await service.listFlaggedReviews(
     { userId: authUser.id, roles: authUser.roles },
     query
   );
 
-  return res.status(200).json({ flagged });
+  return res.status(200).json({
+    flagged: page.flagged,
+    page: {
+      limit: query.limit,
+      nextCursor: page.nextCursor
+    }
+  });
 }));
 
 reviewsRouter.get("/flagged/:flagId", asyncHandler(async (req, res) => {

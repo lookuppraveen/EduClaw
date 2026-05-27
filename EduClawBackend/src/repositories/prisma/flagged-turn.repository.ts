@@ -5,6 +5,7 @@ import type {
   FlaggedTurn,
   FlaggedTurnCreateInput,
   FlaggedTurnDetail,
+  FlaggedTurnListPage,
   FlaggedTurnStatus,
   ReviewDecision,
   ReviewDecisionCreateInput,
@@ -68,6 +69,8 @@ export interface FlaggedTurnListFilters {
   courseIds?: string[];
   courseId?: string;
   status?: FlaggedTurnStatus;
+  limit?: number;
+  cursor?: string;
 }
 
 export const createFlaggedTurn = async (input: FlaggedTurnCreateInput): Promise<FlaggedTurn> => {
@@ -92,19 +95,29 @@ export const findFlaggedTurnByTurnId = async (turnId: string): Promise<FlaggedTu
   return mapFlaggedTurn(row);
 };
 
-export const listFlaggedTurns = async (filters: FlaggedTurnListFilters): Promise<FlaggedTurn[]> => {
+export const listFlaggedTurns = async (filters: FlaggedTurnListFilters): Promise<FlaggedTurnListPage> => {
   const where: Prisma.FlaggedTurnWhereInput = {
     ...(filters.courseId ? { courseId: filters.courseId } : {}),
     ...(filters.courseIds ? { courseId: { in: filters.courseIds } } : {}),
     ...(filters.status ? { status: filters.status } : {})
   };
+  const limit = filters.limit ?? 50;
 
   const rows = await prisma.flaggedTurn.findMany({
     where,
-    orderBy: { createdAt: "desc" }
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" }
+    ],
+    take: limit + 1,
+    ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {})
   });
 
-  return rows.map(mapFlaggedTurn);
+  const pageRows = rows.slice(0, limit);
+  return {
+    flagged: pageRows.map(mapFlaggedTurn),
+    nextCursor: rows.length > limit ? pageRows.at(-1)?.id ?? null : null
+  };
 };
 
 export const findFlaggedTurnById = async (flagId: string): Promise<FlaggedTurnDetail | null> => {
