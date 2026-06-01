@@ -59,12 +59,15 @@ const fetchJwks = async (jwksUri: string, ttlSeconds: number): Promise<JsonWebKe
       maxAttempts: 2,
       retryDelayMs: 50,
       failureThreshold: 3,
-      openMs: 30_000
+      openMs: 30_000,
+      isFailureResult: (response) => !response.ok,
+      createResultFailureError: () => new HttpError(
+        503,
+        "AUTH_PROVIDER_UNAVAILABLE",
+        "Institution SSO JWKS endpoint is unavailable"
+      )
     }
   );
-  if (!response.ok) {
-    throw new HttpError(503, "AUTH_PROVIDER_UNAVAILABLE", "Institution SSO JWKS endpoint is unavailable");
-  }
 
   const jwks = await response.json() as JsonWebKeySet;
   if (!Array.isArray(jwks.keys)) {

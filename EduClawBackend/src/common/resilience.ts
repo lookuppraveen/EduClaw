@@ -5,12 +5,14 @@ interface CircuitState {
   openedUntil: number;
 }
 
-export interface ResilienceOptions {
+export interface ResilienceOptions<T = unknown> {
   circuitName: string;
   maxAttempts?: number;
   retryDelayMs?: number;
   failureThreshold?: number;
   openMs?: number;
+  isFailureResult?: (result: T) => boolean;
+  createResultFailureError?: (result: T) => unknown;
 }
 
 const circuits = new Map<string, CircuitState>();
@@ -50,7 +52,7 @@ export const resetCircuitBreakers = (): void => {
 
 export const runWithRetryAndCircuitBreaker = async <T>(
   operation: () => Promise<T>,
-  options: ResilienceOptions
+  options: ResilienceOptions<T>
 ): Promise<T> => {
   const maxAttempts = options.maxAttempts ?? 2;
   const retryDelayMs = options.retryDelayMs ?? 100;
@@ -67,16 +69,28 @@ export const runWithRetryAndCircuitBreaker = async <T>(
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let result: T;
     try {
-      const result = await operation();
-      recordSuccess(options.circuitName);
-      return result;
+      result = await operation();
     } catch (error) {
       lastError = error;
       if (attempt < maxAttempts) {
         await delay(retryDelayMs);
       }
+      continue;
     }
+
+    if (options.isFailureResult?.(result)) {
+      recordFailure(options.circuitName, failureThreshold, openMs);
+      throw options.createResultFailureError?.(result) ?? new HttpError(
+        503,
+        "EXTERNAL_DEPENDENCY_UNAVAILABLE",
+        "External dependency is unavailable"
+      );
+    }
+
+    recordSuccess(options.circuitName);
+    return result;
   }
 
   recordFailure(options.circuitName, failureThreshold, openMs);
