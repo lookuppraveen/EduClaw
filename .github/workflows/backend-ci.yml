@@ -41,6 +41,7 @@ jobs:
       DATABASE_URL: postgresql://educlaw:educlaw@localhost:5432/educlaw_test
       JWT_ACCESS_SECRET: ci-access-secret-at-least-thirty-two-chars
       JWT_REFRESH_SECRET: ci-refresh-secret-at-least-thirty-two-chars
+      TENANT_ID: educlaw-ci
       AUTH_ALLOW_MOCK_SSO: "true"
       LOG_LEVEL: silent
 
