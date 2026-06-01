@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
-config({ path: ".env.test", override: true });
+config({ path: ".env.test", override: false });
 
 const [, , command, ...args] = process.argv;
 

@@ -21,6 +21,7 @@ This review covers the current modular Express API surface, authentication/sessi
 - RBAC and learner-data ABAC checks are covered by integration tests.
 - Consent changes, policy changes, review decisions, and admin integration updates emit audit records.
 - Audit records are chained with SHA-256 hashes over stable canonical payloads and previous hashes so tampering can be detected during integrity verification; serializable audit writes retry on transaction conflicts.
+- Learner goals, reflection journal prompt/response content, conversation turn text, and agent trace details are encrypted before persistence and decrypted at repository boundaries; legacy plaintext rows remain readable for backward compatibility.
 - Rate limiting is enabled globally.
 - Rate limit buckets are persisted in PostgreSQL so throttling decisions are shared across API instances.
 - HTTP request metric aggregates are persisted in PostgreSQL so the admin metrics endpoint can report across API instances.

@@ -2,6 +2,13 @@ import type { Prisma } from "@prisma/client";
 import type { AgentHop, Citation, Conversation, ConversationTurn } from "../../../types/conversations.js";
 import type { ConversationRepository } from "./conversation.repository.js";
 import { prisma } from "../../../db/prisma.js";
+import { decryptString, encryptString } from "../../../common/crypto.js";
+import { env } from "../../../config/env.js";
+
+const encryptSensitiveText = (value: string): string => encryptString(value, env.DATA_ENCRYPTION_KEY);
+const decryptSensitiveText = (value: string): string => decryptString(value, env.DATA_ENCRYPTION_KEY);
+const encryptSensitiveTextArray = (values: string[]): string[] => values.map(encryptSensitiveText);
+const decryptSensitiveTextArray = (values: string[]): string[] => values.map(decryptSensitiveText);
 
 const parseReflectionKind = (value: "metacognitive" | "goal_check"): "metacognitive" | "goal-check" => {
   if (value === "goal_check") return "goal-check";
@@ -59,35 +66,35 @@ const parseTurn = (row: {
   learnerId: row.learnerId,
   courseId: row.courseId,
   assignmentId: row.assignmentId,
-  studentInput: row.studentInput,
-  selectedChip: row.selectedChip,
+  studentInput: decryptSensitiveText(row.studentInput),
+  selectedChip: row.selectedChip ? decryptSensitiveText(row.selectedChip) : null,
   inference: {
-    intent: row.inferenceIntent,
+    intent: decryptSensitiveText(row.inferenceIntent),
     confusionLevel: row.inferenceConfusion as "low" | "medium" | "high",
-    knowledgeGap: row.inferenceGap,
+    knowledgeGap: decryptSensitiveText(row.inferenceGap),
     urgency: row.inferenceUrgency as "low" | "medium" | "high",
     confidence: row.inferenceConfidence,
-    rationale: row.inferenceRationale,
+    rationale: decryptSensitiveText(row.inferenceRationale),
     recommendedNextAgent: row.inferenceNextAgent
   },
   dialogue: {
-    question: row.dialogueQuestion,
-    chips: row.dialogueChips
+    question: decryptSensitiveText(row.dialogueQuestion),
+    chips: decryptSensitiveTextArray(row.dialogueChips)
   },
   execution: {
-    scaffold: row.executionScaffold,
-    workedExamples: row.executionExamples,
+    scaffold: decryptSensitiveText(row.executionScaffold),
+    workedExamples: decryptSensitiveTextArray(row.executionExamples),
     citations: (row.executionCitations as Citation[]) ?? [],
-    suggestedAction: row.executionAction
+    suggestedAction: decryptSensitiveText(row.executionAction)
   },
   validation: {
     status: row.validationStatus,
-    reason: row.validationReason,
-    studentFacingMessage: row.validationMessage,
-    policyClause: row.validationClause
+    reason: decryptSensitiveText(row.validationReason),
+    studentFacingMessage: decryptSensitiveText(row.validationMessage),
+    policyClause: decryptSensitiveText(row.validationClause)
   },
   reflection: {
-    prompt: row.reflectionPrompt,
+    prompt: decryptSensitiveText(row.reflectionPrompt),
     kind: parseReflectionKind(row.reflectionKind),
     optional: row.reflectionOptional
   },
@@ -110,8 +117,8 @@ const parseTrace = (row: {
   startedAt: row.startedAt.toISOString(),
   durationMs: row.durationMs,
   confidence: row.confidence,
-  outputSummary: row.outputSummary,
-  internalDetails: row.internalDetails
+  outputSummary: decryptSensitiveText(row.outputSummary),
+  internalDetails: decryptSensitiveText(row.internalDetails)
 });
 
 export class PrismaConversationRepository implements ConversationRepository {
@@ -146,26 +153,26 @@ export class PrismaConversationRepository implements ConversationRepository {
           learnerId: turn.learnerId,
           courseId: turn.courseId,
           assignmentId: turn.assignmentId,
-          studentInput: turn.studentInput,
-          selectedChip: turn.selectedChip,
-          inferenceIntent: turn.inference.intent,
+          studentInput: encryptSensitiveText(turn.studentInput),
+          selectedChip: turn.selectedChip ? encryptSensitiveText(turn.selectedChip) : null,
+          inferenceIntent: encryptSensitiveText(turn.inference.intent),
           inferenceConfusion: turn.inference.confusionLevel,
-          inferenceGap: turn.inference.knowledgeGap,
+          inferenceGap: encryptSensitiveText(turn.inference.knowledgeGap),
           inferenceUrgency: turn.inference.urgency,
           inferenceConfidence: turn.inference.confidence,
-          inferenceRationale: turn.inference.rationale,
+          inferenceRationale: encryptSensitiveText(turn.inference.rationale),
           inferenceNextAgent: turn.inference.recommendedNextAgent,
-          dialogueQuestion: turn.dialogue.question,
-          dialogueChips: turn.dialogue.chips,
-          executionScaffold: turn.execution.scaffold,
-          executionExamples: turn.execution.workedExamples,
+          dialogueQuestion: encryptSensitiveText(turn.dialogue.question),
+          dialogueChips: encryptSensitiveTextArray(turn.dialogue.chips),
+          executionScaffold: encryptSensitiveText(turn.execution.scaffold),
+          executionExamples: encryptSensitiveTextArray(turn.execution.workedExamples),
           executionCitations: turn.execution.citations as unknown as Prisma.InputJsonValue,
-          executionAction: turn.execution.suggestedAction,
+          executionAction: encryptSensitiveText(turn.execution.suggestedAction),
           validationStatus: turn.validation.status,
-          validationReason: turn.validation.reason,
-          validationMessage: turn.validation.studentFacingMessage,
-          validationClause: turn.validation.policyClause,
-          reflectionPrompt: turn.reflection.prompt,
+          validationReason: encryptSensitiveText(turn.validation.reason),
+          validationMessage: encryptSensitiveText(turn.validation.studentFacingMessage),
+          validationClause: encryptSensitiveText(turn.validation.policyClause),
+          reflectionPrompt: encryptSensitiveText(turn.reflection.prompt),
           reflectionKind: turn.reflection.kind === "goal-check" ? "goal_check" : "metacognitive",
           reflectionOptional: turn.reflection.optional,
           createdAt: new Date(turn.createdAt)
@@ -181,8 +188,8 @@ export class PrismaConversationRepository implements ConversationRepository {
             startedAt: new Date(hop.startedAt),
             durationMs: hop.durationMs,
             confidence: hop.confidence,
-            outputSummary: hop.outputSummary,
-            internalDetails: hop.internalDetails
+            outputSummary: encryptSensitiveText(hop.outputSummary),
+            internalDetails: encryptSensitiveText(hop.internalDetails)
           }))
         });
       }

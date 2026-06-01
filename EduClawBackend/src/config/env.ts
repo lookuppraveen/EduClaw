@@ -15,6 +15,7 @@ const envSchema = z.object({
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(1209600),
   TENANT_ID: z.string().min(1).default("educlaw-default"),
+  DATA_ENCRYPTION_KEY: z.string().min(32).optional(),
   DATABASE_URL: z.string().url(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
@@ -45,6 +46,7 @@ export const isInstitutionSsoConfigured = (
 
 export const env = {
   ...parsedEnv,
+  DATA_ENCRYPTION_KEY: parsedEnv.DATA_ENCRYPTION_KEY ?? parsedEnv.JWT_ACCESS_SECRET,
   AUTH_ALLOW_MOCK_SSO: isMockSsoAllowed(parsedEnv.NODE_ENV, parsedEnv.AUTH_ALLOW_MOCK_SSO),
   AUTH_INSTITUTION_SSO_CONFIGURED: isInstitutionSsoConfigured(
     parsedEnv.SSO_ISSUER,

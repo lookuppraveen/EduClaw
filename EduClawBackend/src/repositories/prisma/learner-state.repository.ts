@@ -1,10 +1,13 @@
 import { prisma } from "../../db/prisma.js";
-import { newId } from "../../common/crypto.js";
+import { decryptString, encryptString, newId } from "../../common/crypto.js";
+import { env } from "../../config/env.js";
 import type { LearnerGoal, LearnerMastery, LearnerState, ReflectionEntry } from "../../types/learner-state.js";
 
 type ReflectionKind = ReflectionEntry["kind"];
 
 const clampMasteryScore = (score: number): number => Math.max(0, Math.min(1, Number(score.toFixed(2))));
+const encryptSensitiveText = (value: string): string => encryptString(value, env.DATA_ENCRYPTION_KEY);
+const decryptSensitiveText = (value: string): string => decryptString(value, env.DATA_ENCRYPTION_KEY);
 
 const tokenize = (value: string): string[] => {
   return value
@@ -45,7 +48,11 @@ export const findLearnerState = async (learnerId: string): Promise<LearnerState 
   if (!state) return null;
   return {
     learnerId: state.learnerId,
-    goals: state.goals.map((item: { id: string; text: string; createdAt: Date }) => ({ id: item.id, text: item.text, createdAt: item.createdAt.toISOString() })),
+    goals: state.goals.map((item: { id: string; text: string; createdAt: Date }) => ({
+      id: item.id,
+      text: decryptSensitiveText(item.text),
+      createdAt: item.createdAt.toISOString()
+    })),
     mastery: state.mastery.map((item: { outcomeId: string; score: number; evidence: string; updatedAt: Date }) => ({
       outcomeId: item.outcomeId,
       score: item.score,
@@ -54,8 +61,8 @@ export const findLearnerState = async (learnerId: string): Promise<LearnerState 
     })),
     reflections: state.reflections.map((item: { id: string; prompt: string; response: string; kind: ReflectionKind; createdAt: Date }) => ({
       id: item.id,
-      prompt: item.prompt,
-      response: item.response,
+      prompt: decryptSensitiveText(item.prompt),
+      response: decryptSensitiveText(item.response),
       kind: item.kind,
       createdAt: item.createdAt.toISOString()
     }))
@@ -78,7 +85,7 @@ export const replaceLearnerGoals = async (learnerId: string, goals: { text: stri
         data: goals.map((goal, index) => ({
           id: newId(),
           learnerId,
-          text: goal.text,
+          text: encryptSensitiveText(goal.text),
           createdAt: new Date(now.getTime() + index)
         }))
       });
@@ -92,7 +99,7 @@ export const replaceLearnerGoals = async (learnerId: string, goals: { text: stri
 
   return updatedGoals.map((item) => ({
     id: item.id,
-    text: item.text,
+    text: decryptSensitiveText(item.text),
     createdAt: item.createdAt.toISOString()
   }));
 };
@@ -111,8 +118,8 @@ export const createReflectionEntry = async (
     data: {
       id: newId(),
       learnerId,
-      prompt: input.prompt,
-      response: input.response,
+      prompt: encryptSensitiveText(input.prompt),
+      response: encryptSensitiveText(input.response),
       kind: input.kind,
       createdAt: new Date()
     }
@@ -120,8 +127,8 @@ export const createReflectionEntry = async (
 
   return {
     id: reflection.id,
-    prompt: reflection.prompt,
-    response: reflection.response,
+    prompt: decryptSensitiveText(reflection.prompt),
+    response: decryptSensitiveText(reflection.response),
     kind: reflection.kind,
     createdAt: reflection.createdAt.toISOString()
   };
@@ -147,8 +154,8 @@ export const listReflectionEntries = async (
   return {
     reflections: page.map((item) => ({
       id: item.id,
-      prompt: item.prompt,
-      response: item.response,
+      prompt: decryptSensitiveText(item.prompt),
+      response: decryptSensitiveText(item.response),
       kind: item.kind,
       createdAt: item.createdAt.toISOString()
     })),
