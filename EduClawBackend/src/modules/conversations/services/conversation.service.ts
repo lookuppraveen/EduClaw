@@ -36,7 +36,7 @@ export class ConversationService {
       throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Cannot create conversation for this learner");
     }
 
-    if (!(await hasCourseEnrollment(input.learnerId, input.courseId)) && !canAdmin) {
+    if (!(await hasCourseEnrollment(input.learnerId, input.courseId))) {
       throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Learner is not enrolled in requested course");
     }
 
@@ -75,6 +75,10 @@ export class ConversationService {
 
     if (conversation.courseId !== input.courseId) {
       throw new HttpError(422, "CONVERSATION_COURSE_MISMATCH", "Turn courseId must match conversation courseId");
+    }
+
+    if (!(await hasCourseEnrollment(conversation.learnerId, input.courseId))) {
+      throw new HttpError(403, "CONVERSATION_FORBIDDEN", "Learner is not enrolled in requested course");
     }
 
     if (actor.userId !== conversation.learnerId && !actor.roles.includes("admin")) {

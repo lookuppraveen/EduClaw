@@ -770,6 +770,50 @@ describe("EduClaw backend APIs", () => {
     expect(response.body.error.code).toBe("CONVERSATION_FORBIDDEN");
   });
 
+  it("requires active learner enrollment for conversation creation even for admins", async () => {
+    const adminLogin = await loginAs("admin@example.edu");
+
+    const response = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_unenrolled_admin_denied"
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("CONVERSATION_FORBIDDEN");
+  });
+
+  it("blocks turn creation when learner enrollment is no longer active", async () => {
+    await prisma.conversation.create({
+      data: {
+        id: "conv_stale_unenrolled",
+        learnerId: "usr_student_1",
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_stale_enrollment",
+        createdAt: new Date("2026-05-20T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-20T10:00:00.000Z")
+      }
+    });
+
+    const adminLogin = await loginAs("admin@example.edu");
+
+    const response = await request(app)
+      .post("/api/v1/conversations/conv_stale_unenrolled/turns")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`)
+      .send({
+        message: "Please run the turn pipeline for this stale enrollment",
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_stale_enrollment",
+        selectedChip: null
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("CONVERSATION_FORBIDDEN");
+  });
+
   it("creates turn through orchestrator pipeline and returns trace", async () => {
     const loginResponse = await loginAs("maya@example.edu");
     const token = loginResponse.body.accessToken;
