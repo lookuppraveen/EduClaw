@@ -7,7 +7,7 @@ This review covers the current modular Express API surface, authentication/sessi
 ## Remediated Findings
 
 - Invalid refresh and logout tokens now return a controlled `401 AUTH_REFRESH_INVALID` response instead of falling through as generic server errors.
-- `/auth/login` supports institution SSO token verification with configured issuer, audience, and public key; explicit-email mock SSO remains gated to non-production environments.
+- `/auth/login` supports institution SSO token verification with configured issuer and audience using either a static public key or JWKS discovery with a bounded in-process cache; explicit-email mock SSO remains gated to non-production environments.
 - Baseline API security headers are applied globally, including `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and `Cross-Origin-Resource-Policy`.
 - Express framework disclosure is disabled with `x-powered-by` suppression.
 - Admin metrics remain behind the existing admin role guard.
@@ -27,5 +27,4 @@ This review covers the current modular Express API surface, authentication/sessi
 
 ## Remaining Security Work
 
-- Replace static IdP public key configuration with JWKS discovery and key rotation before production.
 - Run an external penetration test against a deployed environment with production-like TLS, proxy, and IdP configuration.

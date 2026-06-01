@@ -79,10 +79,10 @@ model User {
   id           String          @id
   name         String
   email        String          @unique
-  role         UserRole
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   deletedAt    DateTime?
+  roles        UserRoleAssignment[]
   sessions     Session[]
   enrollments  Enrollment[]
   learnerState LearnerState?
@@ -93,6 +93,24 @@ model User {
   updatedPolicies ValidationPolicy[] @relation("PolicyUpdater")
   reviewDecisions ReviewDecision[] @relation("ReviewDecisionReviewer")
   auditLogs AuditLog[] @relation("AuditLogActor")
+}
+
+model Role {
+  name      UserRole @id
+  createdAt DateTime @default(now())
+  users     UserRoleAssignment[]
+}
+
+model UserRoleAssignment {
+  userId    String
+  roleName  UserRole
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleName], references: [name], onDelete: Restrict)
+
+  @@id([userId, roleName])
+  @@index([roleName])
 }
 
 model Session {

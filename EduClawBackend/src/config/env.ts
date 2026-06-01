@@ -22,7 +22,9 @@ const envSchema = z.object({
   AUTH_ALLOW_MOCK_SSO: z.enum(["true", "false"]).optional().transform((value) => value === "true"),
   SSO_ISSUER: z.string().url().optional(),
   SSO_AUDIENCE: z.string().min(1).optional(),
-  SSO_PUBLIC_KEY: z.string().min(1).optional().transform((value) => value?.replace(/\\n/g, "\n"))
+  SSO_PUBLIC_KEY: z.string().min(1).optional().transform((value) => value?.replace(/\\n/g, "\n")),
+  SSO_JWKS_URI: z.string().url().optional(),
+  SSO_JWKS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300)
 });
 
 const parsedEnv = envSchema.parse(process.env);
@@ -31,8 +33,13 @@ export const isMockSsoAllowed = (nodeEnv: string, configured: boolean): boolean 
   return nodeEnv !== "production" && configured;
 };
 
-export const isInstitutionSsoConfigured = (issuer?: string, audience?: string, publicKey?: string): boolean => {
-  return Boolean(issuer && audience && publicKey);
+export const isInstitutionSsoConfigured = (
+  issuer?: string,
+  audience?: string,
+  publicKey?: string,
+  jwksUri?: string
+): boolean => {
+  return Boolean(issuer && audience && (publicKey || jwksUri));
 };
 
 export const env = {
@@ -41,6 +48,7 @@ export const env = {
   AUTH_INSTITUTION_SSO_CONFIGURED: isInstitutionSsoConfigured(
     parsedEnv.SSO_ISSUER,
     parsedEnv.SSO_AUDIENCE,
-    parsedEnv.SSO_PUBLIC_KEY
+    parsedEnv.SSO_PUBLIC_KEY,
+    parsedEnv.SSO_JWKS_URI
   )
 };

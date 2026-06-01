@@ -97,6 +97,18 @@ export const listCourseRoster = async (courseId: string): Promise<CourseRosterEn
     include: { user: true },
     orderBy: [{ role: "asc" }, { createdAt: "asc" }]
   });
+  const userIds = enrollments.map((enrollment) => enrollment.userId);
+  const roleAssignments = await prisma.userRoleAssignment.findMany({
+    where: { userId: { in: userIds } },
+    orderBy: { roleName: "asc" }
+  });
+  const rolesByUserId = new Map<string, UserRole[]>();
+  for (const assignment of roleAssignments) {
+    rolesByUserId.set(assignment.userId, [
+      ...(rolesByUserId.get(assignment.userId) ?? []),
+      assignment.roleName as UserRole
+    ]);
+  }
 
   return enrollments
     .filter((enrollment) => enrollment.user.deletedAt === null)
@@ -106,7 +118,7 @@ export const listCourseRoster = async (courseId: string): Promise<CourseRosterEn
         id: enrollment.user.id,
         name: enrollment.user.name,
         email: enrollment.user.email,
-        roles: [enrollment.user.role as UserRole]
+        roles: rolesByUserId.get(enrollment.user.id) ?? []
       }
     }));
 };

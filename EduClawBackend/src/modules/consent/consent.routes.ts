@@ -5,6 +5,7 @@ import { asyncHandler } from "../../common/async-handler.js";
 import { getConsentRecord, listConsentEvents, updateConsentRecord } from "../../repositories/prisma/consent.repository.js";
 import { createAuditLog } from "../../repositories/prisma/admin.repository.js";
 import { assertConsentWriteAccess } from "../learner-state/abac.js";
+import type { UserRole } from "../../types/auth.js";
 
 const consentScopeKeys = ["course_context", "prior_conversations", "advisor_visibility", "third_party_tools"] as const;
 
@@ -38,6 +39,23 @@ const updateConsentSchema = z.object({
     }
   }
 });
+
+const hasRole = (roles: UserRole[], role: UserRole): boolean => roles.includes(role);
+
+const requireParam = (value: string | string[] | undefined, name: string): string => {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new HttpError(400, "VALIDATION_ERROR", `Missing or invalid path parameter: ${name}`);
+  }
+  return value;
+};
+
+const assertConsentHistoryReadAccess = (actorUserId: string, actorRoles: UserRole[], learnerId: string): void => {
+  if (actorUserId === learnerId || hasRole(actorRoles, "admin") || hasRole(actorRoles, "auditor")) {
+    return;
+  }
+
+  throw new HttpError(403, "CONSENT_FORBIDDEN", "Insufficient permissions for consent history access");
+};
 
 export const consentRouter = Router();
 
@@ -87,4 +105,17 @@ consentRouter.get("/me/history", asyncHandler(async (req, res) => {
 
   const events = await listConsentEvents(authUser.id);
   return res.status(200).json({ events });
+}));
+
+consentRouter.get("/:learnerId/history", asyncHandler(async (req, res) => {
+  const authUser = req.authUser;
+  if (!authUser) {
+    throw new HttpError(401, "AUTH_UNAUTHORIZED", "Unauthorized");
+  }
+
+  const learnerId = requireParam(req.params.learnerId, "learnerId");
+  assertConsentHistoryReadAccess(authUser.id, authUser.roles, learnerId);
+
+  const events = await listConsentEvents(learnerId);
+  return res.status(200).json({ learnerId, events });
 }));

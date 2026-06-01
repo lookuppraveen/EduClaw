@@ -65,14 +65,16 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   const body = loginSchema.parse(req.body);
   const email = env.AUTH_ALLOW_MOCK_SSO
     ? body.email
-    : verifyInstitutionSsoIdToken(
+    : (await verifyInstitutionSsoIdToken(
         { provider: body.provider, idToken: body.idToken },
         {
           issuer: env.SSO_ISSUER,
           audience: env.SSO_AUDIENCE,
-          publicKey: env.SSO_PUBLIC_KEY
+          publicKey: env.SSO_PUBLIC_KEY,
+          jwksUri: env.SSO_JWKS_URI,
+          jwksCacheTtlSeconds: env.SSO_JWKS_CACHE_TTL_SECONDS
         }
-      ).email;
+      )).email;
 
   if (!email) {
     throw new HttpError(400, "VALIDATION_ERROR", "Mock SSO login requires an explicit email");

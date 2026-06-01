@@ -24,19 +24,42 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
   await client.learnerState.deleteMany();
   await client.session.deleteMany();
   await client.enrollment.deleteMany();
+  await client.userRoleAssignment.deleteMany();
+  await client.role.deleteMany();
   await client.material.deleteMany();
   await client.outcome.deleteMany();
   await client.course.deleteMany();
   await client.user.deleteMany();
 
+  await client.role.createMany({
+    data: [
+      { name: "student" },
+      { name: "faculty" },
+      { name: "advisor" },
+      { name: "admin" },
+      { name: "auditor" }
+    ]
+  });
+
   await client.user.createMany({
     data: [
-      { id: "usr_student_1", name: "Maya Chen", email: "maya@example.edu", role: "student" },
-      { id: "usr_student_2", name: "Jordan Rivera", email: "jordan@example.edu", role: "student" },
-      { id: "usr_faculty_1", name: "Prof. Carter", email: "carter@example.edu", role: "faculty" },
-      { id: "usr_admin_1", name: "Admin Jane", email: "admin@example.edu", role: "admin" },
-      { id: "usr_advisor_1", name: "Advisor Lee", email: "advisor@example.edu", role: "advisor" },
-      { id: "usr_auditor_1", name: "Auditor Kim", email: "auditor@example.edu", role: "auditor" }
+      { id: "usr_student_1", name: "Maya Chen", email: "maya@example.edu" },
+      { id: "usr_student_2", name: "Jordan Rivera", email: "jordan@example.edu" },
+      { id: "usr_faculty_1", name: "Prof. Carter", email: "carter@example.edu" },
+      { id: "usr_admin_1", name: "Admin Jane", email: "admin@example.edu" },
+      { id: "usr_advisor_1", name: "Advisor Lee", email: "advisor@example.edu" },
+      { id: "usr_auditor_1", name: "Auditor Kim", email: "auditor@example.edu" }
+    ]
+  });
+
+  await client.userRoleAssignment.createMany({
+    data: [
+      { userId: "usr_student_1", roleName: "student" },
+      { userId: "usr_student_2", roleName: "student" },
+      { userId: "usr_faculty_1", roleName: "faculty" },
+      { userId: "usr_admin_1", roleName: "admin" },
+      { userId: "usr_advisor_1", roleName: "advisor" },
+      { userId: "usr_auditor_1", roleName: "auditor" }
     ]
   });
 

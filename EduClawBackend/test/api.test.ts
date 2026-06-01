@@ -497,6 +497,46 @@ describe("EduClaw backend APIs", () => {
     expect(historyResponse.body.events.length).toBeGreaterThan(0);
   });
 
+  it("supports scoped consent history reads for self, admin, and auditor", async () => {
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const selfScopedResponse = await request(app)
+      .get("/api/v1/consents/usr_student_1/history")
+      .set("Authorization", `Bearer ${studentToken}`);
+
+    expect(selfScopedResponse.status).toBe(200);
+    expect(selfScopedResponse.body.learnerId).toBe("usr_student_1");
+    expect(selfScopedResponse.body.events.length).toBeGreaterThan(0);
+
+    const adminLogin = await loginAs("admin@example.edu");
+    const adminResponse = await request(app)
+      .get("/api/v1/consents/usr_student_1/history")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`);
+
+    expect(adminResponse.status).toBe(200);
+    expect(adminResponse.body.events[0].learnerId).toBe("usr_student_1");
+
+    const auditorLogin = await loginAs("auditor@example.edu");
+    const auditorResponse = await request(app)
+      .get("/api/v1/consents/usr_student_1/history")
+      .set("Authorization", `Bearer ${auditorLogin.body.accessToken}`);
+
+    expect(auditorResponse.status).toBe(200);
+    expect(auditorResponse.body.events[0].learnerId).toBe("usr_student_1");
+  });
+
+  it("blocks non-privileged users from other learner consent history", async () => {
+    const studentLogin = await loginAs("maya@example.edu");
+
+    const response = await request(app)
+      .get("/api/v1/consents/usr_student_2/history")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("CONSENT_FORBIDDEN");
+  });
+
   it("requires complete unique consent scopes on update", async () => {
     const loginResponse = await loginAs("maya@example.edu");
     const token = loginResponse.body.accessToken;
@@ -670,7 +710,11 @@ describe("EduClaw backend APIs", () => {
         id: "usr_faculty_math_only",
         name: "Math Only Faculty",
         email: "math-only@example.edu",
-        role: "faculty"
+        roles: {
+          create: {
+            roleName: "faculty"
+          }
+        }
       }
     });
     await prisma.enrollment.create({

@@ -53,9 +53,9 @@ export const getAdminKpis = async (): Promise<AdminKpis> => {
     advisorVisibilityEnabled
   ] = await Promise.all([
     prisma.user.count({ where: { deletedAt: null } }),
-    prisma.user.count({ where: { role: "student", deletedAt: null } }),
-    prisma.user.count({ where: { role: "faculty", deletedAt: null } }),
-    prisma.user.count({ where: { role: "advisor", deletedAt: null } }),
+    prisma.userRoleAssignment.count({ where: { roleName: "student", user: { deletedAt: null } } }),
+    prisma.userRoleAssignment.count({ where: { roleName: "faculty", user: { deletedAt: null } } }),
+    prisma.userRoleAssignment.count({ where: { roleName: "advisor", user: { deletedAt: null } } }),
     prisma.course.count({ where: { deletedAt: null } }),
     prisma.conversation.count({ where: { deletedAt: null } }),
     prisma.conversationTurn.count(),

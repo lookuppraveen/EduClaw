@@ -10,13 +10,15 @@ config({ path: ".env.test", override: true });
 
 const prisma = new PrismaClient();
 
-beforeAll(async () => {
-  await prisma.$connect();
-});
+if (process.env.SKIP_DB_SETUP !== "true") {
+  beforeAll(async () => {
+    await prisma.$connect();
+  });
 
-beforeEach(async () => {
-  await resetIdempotencyState();
-  await resetHttpMetrics();
-  await resetRateLimitState();
-  await seedDatabase(prisma);
-});
+  beforeEach(async () => {
+    await resetIdempotencyState();
+    await resetHttpMetrics();
+    await resetRateLimitState();
+    await seedDatabase(prisma);
+  });
+}
