@@ -41,8 +41,22 @@ const verifyRefreshTokenOrThrow = (refreshToken: string): JwtRefreshPayload => {
 };
 
 const issueTokens = async (userId: string, roles: JwtAccessPayload["roles"]) => {
+  const primaryRole = roles[0];
+  if (!primaryRole) {
+    throw new HttpError(401, "AUTH_INVALID_CREDENTIALS", "User has no assigned roles");
+  }
+
+  const accessJti = newId();
   const refreshJti = newId();
-  const accessToken = signAccessToken({ sub: userId, roles, type: "access" });
+  const accessToken = signAccessToken({
+    sub: userId,
+    roles,
+    role: primaryRole,
+    tenantId: env.TENANT_ID,
+    scope: roles.map((role) => `role:${role}`),
+    type: "access",
+    jti: accessJti
+  });
   const refreshToken = signRefreshToken({ sub: userId, type: "refresh", jti: refreshJti });
   const now = Date.now();
   await saveSession({

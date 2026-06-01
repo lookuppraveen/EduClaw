@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { fileURLToPath } from "node:url";
+import { calculateAuditLogHash } from "../src/repositories/prisma/admin.repository.js";
 
 const prisma = new PrismaClient();
 
@@ -239,28 +240,38 @@ export const seedDatabase = async (client: PrismaClient): Promise<void> => {
     ]
   });
 
-  await client.auditLog.createMany({
-    data: [
-      {
-        id: "audit_seed_policy_publish",
-        actorUserId: "usr_faculty_1",
-        action: "policy.publish",
-        targetType: "validation_policy",
-        targetId: "pol_math_hw_guardrails",
-        metadata: { courseId: "crs_math_1550" },
-        createdAt: new Date("2026-05-12T10:00:00.000Z")
-      },
-      {
-        id: "audit_seed_consent_update",
-        actorUserId: "usr_student_1",
-        action: "consent.update",
-        targetType: "consent",
-        targetId: "usr_student_1",
-        metadata: { advisorVisibility: false },
-        createdAt: new Date("2026-05-10T09:00:00.000Z")
+  const seededAuditLogs = [
+    {
+      id: "audit_seed_consent_update",
+      actorUserId: "usr_student_1",
+      action: "consent.update",
+      targetType: "consent",
+      targetId: "usr_student_1",
+      metadata: { advisorVisibility: false },
+      createdAt: new Date("2026-05-10T09:00:00.000Z")
+    },
+    {
+      id: "audit_seed_policy_publish",
+      actorUserId: "usr_faculty_1",
+      action: "policy.publish",
+      targetType: "validation_policy",
+      targetId: "pol_math_hw_guardrails",
+      metadata: { courseId: "crs_math_1550" },
+      createdAt: new Date("2026-05-12T10:00:00.000Z")
+    }
+  ];
+  let previousHash: string | null = null;
+  for (const auditLog of seededAuditLogs) {
+    const hash = calculateAuditLogHash({ ...auditLog, previousHash });
+    await client.auditLog.create({
+      data: {
+        ...auditLog,
+        previousHash,
+        hash
       }
-    ]
-  });
+    });
+    previousHash = hash;
+  }
 };
 
 const runCli = async (): Promise<void> => {

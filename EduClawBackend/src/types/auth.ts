@@ -10,7 +10,11 @@ export interface User {
 export interface JwtAccessPayload {
   sub: string;
   roles: UserRole[];
+  role: UserRole;
+  tenantId: string;
+  scope: string[];
   type: "access";
+  jti: string;
 }
 
 export interface JwtRefreshPayload {

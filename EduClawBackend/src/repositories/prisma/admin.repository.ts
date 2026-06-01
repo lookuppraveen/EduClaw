@@ -1,7 +1,50 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { newId } from "../../common/crypto.js";
 import { prisma } from "../../db/prisma.js";
 import type { AdminKpis, AuditLogRecord, IntegrationStatusRecord, IntegrationStatusValue } from "../../types/admin.js";
+
+const AUDIT_CHAIN_GENESIS = "GENESIS";
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+};
+
+export const calculateAuditLogHash = (input: {
+  id: string;
+  actorUserId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  metadata: unknown;
+  previousHash: string | null;
+  createdAt: Date;
+}): string => {
+  const payload = stableStringify({
+    id: input.id,
+    actorUserId: input.actorUserId,
+    action: input.action,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    metadata: input.metadata,
+    previousHash: input.previousHash ?? AUDIT_CHAIN_GENESIS,
+    createdAt: input.createdAt.toISOString()
+  });
+
+  return createHash("sha256").update(payload).digest("hex");
+};
 
 const mapIntegration = (row: {
   name: string;
@@ -26,6 +69,8 @@ const mapAuditLog = (row: {
   targetType: string;
   targetId: string | null;
   metadata: unknown;
+  previousHash?: string | null;
+  hash?: string | null;
   createdAt: Date;
 }): AuditLogRecord => ({
   id: row.id,
@@ -160,16 +205,91 @@ export const createAuditLog = async (input: {
   targetId: string | null;
   metadata: Prisma.InputJsonValue;
 }): Promise<AuditLogRecord> => {
-  const created = await prisma.auditLog.create({
-    data: {
-      id: newId(),
+  const created = await prisma.$transaction(async (tx) => {
+    const previous = await tx.auditLog.findFirst({
+      where: { hash: { not: null } },
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" }
+      ],
+      select: { hash: true }
+    });
+    const createdAt = new Date();
+    const id = newId();
+    const previousHash = previous?.hash ?? null;
+    const hash = calculateAuditLogHash({
+      id,
       actorUserId: input.actorUserId,
       action: input.action,
       targetType: input.targetType,
       targetId: input.targetId,
-      metadata: input.metadata
-    }
+      metadata: input.metadata,
+      previousHash,
+      createdAt
+    });
+
+    return await tx.auditLog.create({
+      data: {
+        id,
+        actorUserId: input.actorUserId,
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        metadata: input.metadata,
+        previousHash,
+        hash,
+        createdAt
+      }
+    });
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable
   });
 
   return mapAuditLog(created);
+};
+
+export const verifyAuditLogIntegrity = async (): Promise<{ valid: boolean; brokenAt: string | null }> => {
+  const rows = await prisma.auditLog.findMany({
+    orderBy: [
+      { createdAt: "asc" },
+      { id: "asc" }
+    ]
+  });
+
+  let expectedPreviousHash: string | null = null;
+  let chainStarted = false;
+  for (const row of rows) {
+    if (!row.hash && !chainStarted) {
+      continue;
+    }
+
+    if (!row.hash) {
+      return { valid: false, brokenAt: row.id };
+    }
+
+    chainStarted = true;
+
+    if (row.previousHash !== expectedPreviousHash) {
+      return { valid: false, brokenAt: row.id };
+    }
+
+    const expectedHash = calculateAuditLogHash({
+      id: row.id,
+      actorUserId: row.actorUserId,
+      action: row.action,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      metadata: row.metadata,
+      previousHash: row.previousHash,
+      createdAt: row.createdAt
+    });
+
+    if (row.hash !== expectedHash) {
+      return { valid: false, brokenAt: row.id };
+    }
+
+    expectedPreviousHash = row.hash;
+  }
+
+  return { valid: true, brokenAt: null };
 };

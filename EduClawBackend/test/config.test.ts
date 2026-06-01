@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { generateKeyPairSync } from "node:crypto";
 import { env, isInstitutionSsoConfigured, isMockSsoAllowed } from "../src/config/env.js";
 import { HttpError } from "../src/common/errors.js";
+import { signAccessToken, verifyAccessToken } from "../src/modules/auth/jwt.js";
 import { resetSsoJwksCache, verifyInstitutionSsoIdToken } from "../src/modules/auth/sso.service.js";
 
 afterEach(() => {
@@ -27,6 +28,28 @@ describe("environment config", () => {
     expect(isInstitutionSsoConfigured("https://idp.example.edu", "educlaw", "public-key")).toBe(true);
     expect(isInstitutionSsoConfigured("https://idp.example.edu", "educlaw", undefined, "https://idp.example.edu/jwks")).toBe(true);
     expect(isInstitutionSsoConfigured("https://idp.example.edu", "educlaw", undefined, undefined)).toBe(false);
+  });
+
+  it("includes planned authorization claims in access tokens", () => {
+    const token = signAccessToken({
+      sub: "usr_student_1",
+      roles: ["student"],
+      role: "student",
+      tenantId: env.TENANT_ID,
+      scope: ["role:student"],
+      type: "access",
+      jti: "access-jti-1"
+    });
+
+    expect(verifyAccessToken(token)).toMatchObject({
+      sub: "usr_student_1",
+      roles: ["student"],
+      role: "student",
+      tenantId: env.TENANT_ID,
+      scope: ["role:student"],
+      type: "access",
+      jti: "access-jti-1"
+    });
   });
 
   it("verifies institution SSO tokens with issuer, audience, and public key", async () => {

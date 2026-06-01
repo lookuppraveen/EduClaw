@@ -746,6 +746,30 @@ describe("EduClaw backend APIs", () => {
     expect(response.body.error.code).toBe("CONVERSATION_FORBIDDEN");
   });
 
+  it("blocks students from creating conversations for another learner", async () => {
+    await prisma.enrollment.create({
+      data: {
+        userId: "usr_student_2",
+        courseId: "crs_math_1550",
+        role: "student"
+      }
+    });
+
+    const studentLogin = await loginAs("maya@example.edu");
+
+    const response = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`)
+      .send({
+        learnerId: "usr_student_2",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_cross_learner_denied"
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("CONVERSATION_FORBIDDEN");
+  });
+
   it("creates turn through orchestrator pipeline and returns trace", async () => {
     const loginResponse = await loginAs("maya@example.edu");
     const token = loginResponse.body.accessToken;
@@ -987,6 +1011,65 @@ describe("EduClaw backend APIs", () => {
       .set("Authorization", `Bearer ${studentToken}`);
 
     expect(studentTrace.status).toBe(200);
+
+    const auditorLogin = await loginAs("auditor@example.edu");
+    const auditorTrace = await request(app)
+      .get(`/api/v1/turns/${createTurnResponse.body.turn.id}/trace`)
+      .set("Authorization", `Bearer ${auditorLogin.body.accessToken}`);
+
+    expect(auditorTrace.status).toBe(200);
+    expect(auditorTrace.body.trace[0].internalDetails).not.toBe("hidden");
+  });
+
+  it("blocks advisor trace access even when advisor visibility consent is enabled", async () => {
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const consentResponse = await request(app)
+      .put("/api/v1/consents/me")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        scopes: [
+          { key: "course_context", enabled: true },
+          { key: "prior_conversations", enabled: true },
+          { key: "advisor_visibility", enabled: true },
+          { key: "third_party_tools", enabled: false }
+        ],
+        reason: "Allow advisor learner-state visibility"
+      });
+
+    expect(consentResponse.status).toBe(200);
+
+    const createConversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_advisor_trace_scope"
+      });
+
+    expect(createConversationResponse.status).toBe(201);
+
+    const createTurnResponse = await request(app)
+      .post(`/api/v1/conversations/${createConversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "Can you help me understand chain rule?",
+        courseId: "crs_math_1550",
+        assignmentId: "asg_advisor_trace_scope",
+        selectedChip: null
+      });
+
+    expect(createTurnResponse.status).toBe(201);
+
+    const advisorLogin = await loginAs("advisor@example.edu");
+    const advisorTrace = await request(app)
+      .get(`/api/v1/turns/${createTurnResponse.body.turn.id}/trace`)
+      .set("Authorization", `Bearer ${advisorLogin.body.accessToken}`);
+
+    expect(advisorTrace.status).toBe(403);
+    expect(advisorTrace.body.error.code).toBe("CONVERSATION_FORBIDDEN");
   });
 
 
@@ -1167,6 +1250,94 @@ describe("EduClaw backend APIs", () => {
     expect(flagged?.status).toBe("pending");
   });
 
+  it("does not apply draft or archived policies during turn processing", async () => {
+    const facultyLogin = await loginAs("carter@example.edu");
+    const facultyToken = facultyLogin.body.accessToken;
+
+    const policyResponse = await request(app)
+      .post("/api/v1/policies")
+      .set("Authorization", `Bearer ${facultyToken}`)
+      .send({
+        courseId: "crs_eng_1010",
+        assignmentId: "asg_policy_lifecycle",
+        title: "Essay Source Guardrails",
+        clauses: [
+          {
+            rule: "Flag unsupported primary source essay support",
+            when: "student asks for primary source essay support",
+            onViolation: "flag"
+          }
+        ]
+      });
+
+    expect(policyResponse.status).toBe(201);
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const draftConversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_eng_1010",
+        assignmentId: "asg_policy_lifecycle"
+      });
+
+    expect(draftConversationResponse.status).toBe(201);
+
+    const draftTurnResponse = await request(app)
+      .post(`/api/v1/conversations/${draftConversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "I need primary source essay support",
+        courseId: "crs_eng_1010",
+        assignmentId: "asg_policy_lifecycle",
+        selectedChip: null
+      });
+
+    expect(draftTurnResponse.status).toBe(201);
+    expect(draftTurnResponse.body.turn.validation.status).toBe("approved");
+    expect(await findFlaggedTurnByTurnId(draftTurnResponse.body.turn.id as string)).toBeNull();
+
+    const publishResponse = await request(app)
+      .post(`/api/v1/policies/${policyResponse.body.policy.id}/publish`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(publishResponse.status).toBe(200);
+
+    const archiveResponse = await request(app)
+      .delete(`/api/v1/policies/${policyResponse.body.policy.id}`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(archiveResponse.status).toBe(204);
+
+    const archivedConversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_eng_1010",
+        assignmentId: "asg_policy_lifecycle"
+      });
+
+    expect(archivedConversationResponse.status).toBe(201);
+
+    const archivedTurnResponse = await request(app)
+      .post(`/api/v1/conversations/${archivedConversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "I need primary source essay support",
+        courseId: "crs_eng_1010",
+        assignmentId: "asg_policy_lifecycle",
+        selectedChip: null
+      });
+
+    expect(archivedTurnResponse.status).toBe(201);
+    expect(archivedTurnResponse.body.turn.validation.status).toBe("approved");
+    expect(await findFlaggedTurnByTurnId(archivedTurnResponse.body.turn.id as string)).toBeNull();
+  });
+
 
   it("supports faculty flagged review queue, detail, and decision workflow", async () => {
     const facultyLogin = await loginAs("carter@example.edu");
@@ -1314,6 +1485,95 @@ describe("EduClaw backend APIs", () => {
 
     expect(duplicateCheckDetail.status).toBe(200);
     expect(duplicateCheckDetail.body.flaggedTurn.decisions).toHaveLength(1);
+  });
+
+  it("blocks faculty review access for flagged turns outside assigned courses", async () => {
+    await prisma.enrollment.create({
+      data: {
+        userId: "usr_student_1",
+        courseId: "crs_hist_2000",
+        role: "student"
+      }
+    });
+
+    const adminLogin = await loginAs("admin@example.edu");
+    const adminToken = adminLogin.body.accessToken;
+
+    const policyResponse = await request(app)
+      .post("/api/v1/policies")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_hist_review_scope",
+        title: "History Review Scope Guardrails",
+        clauses: [
+          {
+            rule: "Flag historical context direct support",
+            when: "student asks historical context direct support",
+            onViolation: "flag"
+          }
+        ]
+      });
+
+    expect(policyResponse.status).toBe(201);
+
+    const publishResponse = await request(app)
+      .post(`/api/v1/policies/${policyResponse.body.policy.id}/publish`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(publishResponse.status).toBe(200);
+
+    const studentLogin = await loginAs("maya@example.edu");
+    const studentToken = studentLogin.body.accessToken;
+
+    const conversationResponse = await request(app)
+      .post("/api/v1/conversations")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        learnerId: "usr_student_1",
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_hist_review_scope"
+      });
+
+    expect(conversationResponse.status).toBe(201);
+
+    const turnResponse = await request(app)
+      .post(`/api/v1/conversations/${conversationResponse.body.conversation.id}/turns`)
+      .set("Authorization", `Bearer ${studentToken}`)
+      .send({
+        message: "I need historical context direct support",
+        courseId: "crs_hist_2000",
+        assignmentId: "asg_hist_review_scope",
+        selectedChip: null
+      });
+
+    expect(turnResponse.status).toBe(201);
+    const flagged = await findFlaggedTurnByTurnId(turnResponse.body.turn.id as string);
+    expect(flagged?.courseId).toBe("crs_hist_2000");
+
+    const facultyLogin = await loginAs("carter@example.edu");
+    const facultyToken = facultyLogin.body.accessToken;
+
+    const scopedListResponse = await request(app)
+      .get("/api/v1/reviews/flagged?courseId=crs_hist_2000")
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(scopedListResponse.status).toBe(403);
+    expect(scopedListResponse.body.error.code).toBe("REVIEW_FORBIDDEN");
+
+    const detailResponse = await request(app)
+      .get(`/api/v1/reviews/flagged/${flagged?.id}`)
+      .set("Authorization", `Bearer ${facultyToken}`);
+
+    expect(detailResponse.status).toBe(403);
+    expect(detailResponse.body.error.code).toBe("REVIEW_FORBIDDEN");
+
+    const adminDetailResponse = await request(app)
+      .get(`/api/v1/reviews/flagged/${flagged?.id}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(adminDetailResponse.status).toBe(200);
+    expect(adminDetailResponse.body.flaggedTurn.courseId).toBe("crs_hist_2000");
   });
 
   it("denies flagged review endpoints for student role", async () => {

@@ -5,6 +5,7 @@ import { getSession, isRefreshTokenValid, saveSession } from "../src/repositorie
 import { findCourseById, sharesCourseWithLearner } from "../src/repositories/prisma/course.repository.js";
 import { findLearnerState, updateMasteryFromCompletedTurn } from "../src/repositories/prisma/learner-state.repository.js";
 import { getConsentRecord, updateConsentRecord } from "../src/repositories/prisma/consent.repository.js";
+import { createAuditLog, verifyAuditLogIntegrity } from "../src/repositories/prisma/admin.repository.js";
 import { newId, sha256 } from "../src/common/crypto.js";
 
 describe("Prisma repositories", () => {
@@ -116,5 +117,35 @@ describe("Prisma repositories", () => {
 
     const consent = await getConsentRecord("usr_student_1");
     expect(consent?.scopes.find((item) => item.key === "advisor_visibility")?.enabled).toBe(true);
+  });
+
+  it("stores audit logs in a tamper-evident hash chain", async () => {
+    const first = await createAuditLog({
+      actorUserId: "usr_admin_1",
+      action: "security.audit.first",
+      targetType: "audit_log",
+      targetId: "first",
+      metadata: { severity: "info", sequence: 1 }
+    });
+    const second = await createAuditLog({
+      actorUserId: "usr_admin_1",
+      action: "security.audit.second",
+      targetType: "audit_log",
+      targetId: "second",
+      metadata: { severity: "info", sequence: 2 }
+    });
+
+    const firstRow = await prisma.auditLog.findUniqueOrThrow({ where: { id: first.id } });
+    const secondRow = await prisma.auditLog.findUniqueOrThrow({ where: { id: second.id } });
+    expect(firstRow.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(secondRow.previousHash).toBe(firstRow.hash);
+    await expect(verifyAuditLogIntegrity()).resolves.toEqual({ valid: true, brokenAt: null });
+
+    await prisma.auditLog.update({
+      where: { id: first.id },
+      data: { metadata: { severity: "critical", sequence: 1 } }
+    });
+
+    await expect(verifyAuditLogIntegrity()).resolves.toEqual({ valid: false, brokenAt: first.id });
   });
 });
