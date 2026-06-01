@@ -5,6 +5,8 @@ import { prisma } from "../../db/prisma.js";
 import type { AdminKpis, AuditLogRecord, IntegrationStatusRecord, IntegrationStatusValue } from "../../types/admin.js";
 
 const AUDIT_CHAIN_GENESIS = "GENESIS";
+const AUDIT_LOG_WRITE_MAX_ATTEMPTS = 3;
+const AUDIT_LOG_RETRY_BASE_DELAY_MS = 25;
 
 const stableStringify = (value: unknown): string => {
   if (value === null || typeof value !== "object") {
@@ -44,6 +46,16 @@ export const calculateAuditLogHash = (input: {
   });
 
   return createHash("sha256").update(payload).digest("hex");
+};
+
+const delay = async (milliseconds: number): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+};
+
+export const isRetryableAuditLogWriteError = (error: unknown): boolean => {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
 };
 
 const mapIntegration = (row: {
@@ -205,47 +217,59 @@ export const createAuditLog = async (input: {
   targetId: string | null;
   metadata: Prisma.InputJsonValue;
 }): Promise<AuditLogRecord> => {
-  const created = await prisma.$transaction(async (tx) => {
-    const previous = await tx.auditLog.findFirst({
-      where: { hash: { not: null } },
-      orderBy: [
-        { createdAt: "desc" },
-        { id: "desc" }
-      ],
-      select: { hash: true }
-    });
-    const createdAt = new Date();
-    const id = newId();
-    const previousHash = previous?.hash ?? null;
-    const hash = calculateAuditLogHash({
-      id,
-      actorUserId: input.actorUserId,
-      action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      metadata: input.metadata,
-      previousHash,
-      createdAt
-    });
+  for (let attempt = 1; attempt <= AUDIT_LOG_WRITE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const previous = await tx.auditLog.findFirst({
+          where: { hash: { not: null } },
+          orderBy: [
+            { createdAt: "desc" },
+            { id: "desc" }
+          ],
+          select: { hash: true }
+        });
+        const createdAt = new Date();
+        const id = newId();
+        const previousHash = previous?.hash ?? null;
+        const hash = calculateAuditLogHash({
+          id,
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          metadata: input.metadata,
+          previousHash,
+          createdAt
+        });
 
-    return await tx.auditLog.create({
-      data: {
-        id,
-        actorUserId: input.actorUserId,
-        action: input.action,
-        targetType: input.targetType,
-        targetId: input.targetId,
-        metadata: input.metadata,
-        previousHash,
-        hash,
-        createdAt
+        return await tx.auditLog.create({
+          data: {
+            id,
+            actorUserId: input.actorUserId,
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId,
+            metadata: input.metadata,
+            previousHash,
+            hash,
+            createdAt
+          }
+        });
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+      });
+
+      return mapAuditLog(created);
+    } catch (error) {
+      if (!isRetryableAuditLogWriteError(error) || attempt === AUDIT_LOG_WRITE_MAX_ATTEMPTS) {
+        throw error;
       }
-    });
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable
-  });
 
-  return mapAuditLog(created);
+      await delay(AUDIT_LOG_RETRY_BASE_DELAY_MS * attempt);
+    }
+  }
+
+  throw new Error("Audit log write retry loop exited unexpectedly");
 };
 
 export const verifyAuditLogIntegrity = async (): Promise<{ valid: boolean; brokenAt: string | null }> => {
