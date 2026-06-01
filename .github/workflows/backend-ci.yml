@@ -42,6 +42,7 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-at-least-thirty-two-chars
       JWT_REFRESH_SECRET: ci-refresh-secret-at-least-thirty-two-chars
       TENANT_ID: educlaw-ci
+      DATA_ENCRYPTION_KEY: ci-data-encryption-key-at-least-thirty-two-chars
       AUTH_ALLOW_MOCK_SSO: "true"
       LOG_LEVEL: silent
 
