@@ -16,6 +16,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:dbpush:test": "node scripts/with-test-env.mjs prisma db push --skip-generate --accept-data-loss",
     "prisma:seed:test": "node scripts/with-test-env.mjs tsx prisma/seed.ts",
+    "test:db:setup": "node scripts/with-test-env.mjs node scripts/setup-test-db.mjs",
     "test:db:check": "node scripts/with-test-env.mjs node scripts/check-test-db.mjs",
     "test:db:prepare": "npm run prisma:migrate:test && npm run prisma:seed:test",
     "security:audit": "npm audit --omit=dev --audit-level=high",

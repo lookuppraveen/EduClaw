@@ -54,6 +54,33 @@ describe("EduClaw backend APIs", () => {
     expect(response.headers["ratelimit-limit"]).toBe("100");
   });
 
+  it("rate limits authenticated requests by user principal before client bucket fallback", async () => {
+    const clientId = "shared-authenticated-client";
+    const studentLogin = await loginAs("maya@example.edu");
+    const adminLogin = await loginAs("admin@example.edu");
+
+    let studentResponse = await request(app)
+      .get("/api/v1/courses")
+      .set("Authorization", `Bearer ${studentLogin.body.accessToken}`)
+      .set("x-client-id", clientId);
+
+    for (let index = 1; index < 100; index += 1) {
+      studentResponse = await request(app)
+        .get("/api/v1/courses")
+        .set("Authorization", `Bearer ${studentLogin.body.accessToken}`)
+        .set("x-client-id", clientId);
+    }
+
+    expect(studentResponse.status).toBe(200);
+
+    const adminResponse = await request(app)
+      .get("/api/v1/courses")
+      .set("Authorization", `Bearer ${adminLogin.body.accessToken}`)
+      .set("x-client-id", clientId);
+
+    expect(adminResponse.status).toBe(200);
+  });
+
   it("supports auth login and me", async () => {
     const loginResponse = await loginAs("maya@example.edu");
 

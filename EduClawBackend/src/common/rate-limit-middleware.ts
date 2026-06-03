@@ -6,10 +6,36 @@ import {
   deleteExpiredRateLimitBuckets,
   resetRateLimitBuckets
 } from "../repositories/prisma/rate-limit.repository.js";
+import { verifyAccessToken } from "../modules/auth/jwt.js";
+
+const extractBearerToken = (authorization?: string): string | null => {
+  if (!authorization) return null;
+  const [scheme, token] = authorization.split(" ");
+  if (scheme !== "Bearer" || !token) return null;
+  return token;
+};
+
+const getAuthenticatedPrincipal = (req: Request): string | null => {
+  if (req.authUser?.id) {
+    return req.authUser.id;
+  }
+
+  const token = extractBearerToken(req.header("authorization"));
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const payload = verifyAccessToken(token);
+    return payload.type === "access" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+};
 
 const getClientKey = (req: Request): string => {
   const explicitClient = req.header("x-client-id");
-  const principal = req.authUser?.id ?? explicitClient ?? req.ip ?? "unknown";
+  const principal = getAuthenticatedPrincipal(req) ?? explicitClient ?? req.ip ?? "unknown";
   return `${principal}:${req.method}:${req.path}`;
 };
 
