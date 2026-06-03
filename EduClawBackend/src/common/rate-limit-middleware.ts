@@ -40,7 +40,7 @@ const getClientKey = (req: Request): string => {
 };
 
 const isProbeRequest = (req: Request): boolean => {
-  return req.method === "GET" && (req.path === "/api/v1/health" || req.path === "/api/v1/ready");
+  return req.method === "GET" && req.path === "/api/v1/ready";
 };
 
 export const resetRateLimitState = async (): Promise<void> => {
