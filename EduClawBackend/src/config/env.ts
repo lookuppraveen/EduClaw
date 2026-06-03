@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { parseAllowedOrigins } from "../common/cors.js";
 
 if (process.env.NODE_ENV === "test") {
   dotenv.config({ path: ".env.test", override: true });
@@ -17,6 +18,7 @@ const envSchema = z.object({
   TENANT_ID: z.string().min(1).default("educlaw-default"),
   DATA_ENCRYPTION_KEY: z.string().min(32).optional(),
   DATABASE_URL: z.string().url(),
+  CORS_ORIGINS: z.string().optional().transform(parseAllowedOrigins),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
   IDEMPOTENCY_TTL_MS: z.coerce.number().int().positive().default(600_000),
@@ -43,6 +45,59 @@ export const isInstitutionSsoConfigured = (
 ): boolean => {
   return Boolean(issuer && audience && (publicKey || jwksUri));
 };
+
+type ProductionConfigInput = {
+  NODE_ENV: string;
+  JWT_ACCESS_SECRET: string;
+  JWT_REFRESH_SECRET: string;
+  DATA_ENCRYPTION_KEY?: string;
+  CORS_ORIGINS: string[];
+  SSO_ISSUER?: string;
+  SSO_AUDIENCE?: string;
+  SSO_PUBLIC_KEY?: string;
+  SSO_JWKS_URI?: string;
+};
+
+export const getProductionConfigIssues = (config: ProductionConfigInput): string[] => {
+  if (config.NODE_ENV !== "production") {
+    return [];
+  }
+
+  const issues: string[] = [];
+
+  if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
+    issues.push("JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different");
+  }
+
+  if (!config.DATA_ENCRYPTION_KEY) {
+    issues.push("DATA_ENCRYPTION_KEY is required");
+  } else if (
+    config.DATA_ENCRYPTION_KEY === config.JWT_ACCESS_SECRET ||
+    config.DATA_ENCRYPTION_KEY === config.JWT_REFRESH_SECRET
+  ) {
+    issues.push("DATA_ENCRYPTION_KEY must be different from JWT secrets");
+  }
+
+  if (config.CORS_ORIGINS.length === 0) {
+    issues.push("CORS_ORIGINS must include at least one approved origin");
+  }
+
+  if (!isInstitutionSsoConfigured(
+    config.SSO_ISSUER,
+    config.SSO_AUDIENCE,
+    config.SSO_PUBLIC_KEY,
+    config.SSO_JWKS_URI
+  )) {
+    issues.push("institution SSO configuration is required");
+  }
+
+  return issues;
+};
+
+const productionConfigIssues = getProductionConfigIssues(parsedEnv);
+if (productionConfigIssues.length > 0) {
+  throw new Error(`Production configuration is incomplete: ${productionConfigIssues.join("; ")}`);
+}
 
 export const env = {
   ...parsedEnv,

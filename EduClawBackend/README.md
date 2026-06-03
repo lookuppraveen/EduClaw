@@ -23,6 +23,10 @@ $env:TEST_DATABASE_ADMIN_URL="postgresql://postgres:password@localhost:5432/post
 npm.cmd run test:db:setup
 ```
 
+`npm.cmd test` also uses `TEST_DATABASE_ADMIN_URL` when it is set: if the
+configured test database is not reachable, the test runner will bootstrap the
+expected role/database before running migrations.
+
 Example:
 
 ```powershell

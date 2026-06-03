@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { env } from "./config/env.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter, meHandler } from "./modules/auth/auth.routes.js";
 import { requireAuth } from "./modules/auth/auth.middleware.js";
@@ -11,6 +12,7 @@ import { idempotencyMiddleware } from "./common/idempotency-middleware.js";
 import { metricsMiddleware } from "./common/metrics.js";
 import { securityHeadersMiddleware } from "./common/security-headers-middleware.js";
 import { errorMiddleware } from "./common/error-middleware.js";
+import { buildCorsOptions } from "./common/cors.js";
 import { requireRoles } from "./modules/auth/rbac.middleware.js";
 import { coursesRouter } from "./modules/courses/courses.routes.js";
 import { learnerStateRouter } from "./modules/learner-state/learner-state.routes.js";
@@ -26,7 +28,7 @@ import { usersRouter } from "./modules/users/users.routes.js";
 export const app = express();
 
 app.disable("x-powered-by");
-app.use(cors());
+app.use(cors(buildCorsOptions({ allowedOrigins: env.CORS_ORIGINS, nodeEnv: env.NODE_ENV })));
 app.use(express.json());
 app.use(securityHeadersMiddleware);
 app.use(requestContextMiddleware);

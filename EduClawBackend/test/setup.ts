@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
-import { beforeAll, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach } from "vitest";
 import { seedDatabase } from "../prisma/seed.js";
 import { resetIdempotencyState } from "../src/common/idempotency-middleware.js";
 import { resetHttpMetrics } from "../src/common/metrics.js";
@@ -20,5 +20,9 @@ if (process.env.SKIP_DB_SETUP !== "true") {
     await resetHttpMetrics();
     await resetRateLimitState();
     await seedDatabase(prisma);
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
   });
 }

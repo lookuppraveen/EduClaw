@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { app } from "../src/app.js";
 import { prisma } from "../src/db/prisma.js";
 import { findFlaggedTurnByTurnId } from "../src/repositories/prisma/flagged-turn.repository.js";
@@ -16,6 +16,28 @@ describe("EduClaw backend APIs", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "ok" });
+  });
+
+  it("returns readiness status when dependencies are reachable", async () => {
+    vi.spyOn(prisma, "$queryRaw").mockResolvedValueOnce([{ result: 1 }]);
+
+    const response = await request(app).get("/api/v1/ready");
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("ready");
+    expect(response.body.checkedAt).toBeTypeOf("string");
+    expect(response.body.checks.database.status).toBe("ok");
+  });
+
+  it("returns not ready when database connectivity fails", async () => {
+    vi.spyOn(prisma, "$queryRaw").mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await request(app).get("/api/v1/ready");
+
+    expect(response.status).toBe(503);
+    expect(response.body.status).toBe("not_ready");
+    expect(response.body.checkedAt).toBeTypeOf("string");
+    expect(response.body.checks.database.status).toBe("unavailable");
   });
 
   it("propagates W3C trace context on responses", async () => {
@@ -39,6 +61,15 @@ describe("EduClaw backend APIs", () => {
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.headers["x-frame-options"]).toBe("DENY");
     expect(response.headers["x-powered-by"]).toBeUndefined();
+  });
+
+  it("reflects browser origins in non-production CORS mode", async () => {
+    const response = await request(app)
+      .get("/api/v1/health")
+      .set("Origin", "https://frontend.local.test");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://frontend.local.test");
   });
 
   it("rate limits repeated requests from the same client bucket", async () => {

@@ -7,20 +7,7 @@ import type {
   ReflectionPrompt,
   ValidationVerdict
 } from "../../../types/conversations.js";
-
-export interface OrchestratorInput {
-  message: string;
-  selectedChip: string | null;
-}
-
-export interface OrchestratorOutput {
-  inference: InferenceDiagnosis;
-  dialogue: DialoguePrompt;
-  execution: ExecutionResponse;
-  validation: ValidationVerdict;
-  reflection: ReflectionPrompt;
-  trace: AgentHop[];
-}
+import type { OrchestratorInput, OrchestratorOutput, OrchestratorService } from "./orchestrator.service.js";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -100,7 +87,7 @@ const hop = (agent: AgentHop["agent"], confidence: number, outputSummary: string
   internalDetails
 });
 
-export class MockOrchestratorService {
+export class MockOrchestratorService implements OrchestratorService {
   run(input: OrchestratorInput): OrchestratorOutput {
     const inference = buildInference(input.message);
     const dialogue = buildDialogue(input.selectedChip);

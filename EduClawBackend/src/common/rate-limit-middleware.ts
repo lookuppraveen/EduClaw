@@ -39,11 +39,20 @@ const getClientKey = (req: Request): string => {
   return `${principal}:${req.method}:${req.path}`;
 };
 
+const isProbeRequest = (req: Request): boolean => {
+  return req.method === "GET" && (req.path === "/api/v1/health" || req.path === "/api/v1/ready");
+};
+
 export const resetRateLimitState = async (): Promise<void> => {
   await resetRateLimitBuckets();
 };
 
 export const rateLimitMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (isProbeRequest(req)) {
+    next();
+    return;
+  }
+
   try {
     const now = new Date();
     await deleteExpiredRateLimitBuckets(now);

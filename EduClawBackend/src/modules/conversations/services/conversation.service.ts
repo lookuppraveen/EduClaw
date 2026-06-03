@@ -11,7 +11,7 @@ import type { AgentHop, Conversation, ConversationTurn, ValidationVerdict } from
 import type { CreateConversationInput, CreateTurnInput } from "../dto/conversation.dto.js";
 import type { ConversationRepository } from "../repositories/conversation.repository.js";
 import { PolicyEvaluatorService } from "../../policies/services/policy-evaluator.service.js";
-import { MockOrchestratorService } from "./mock-orchestrator.service.js";
+import type { OrchestratorService } from "./orchestrator.service.js";
 
 export interface ActorContext {
   userId: string;
@@ -21,7 +21,7 @@ export interface ActorContext {
 export class ConversationService {
   constructor(
     private readonly repository: ConversationRepository,
-    private readonly orchestrator: MockOrchestratorService,
+    private readonly orchestrator: OrchestratorService,
     private readonly policyEvaluator: PolicyEvaluatorService
   ) {}
 

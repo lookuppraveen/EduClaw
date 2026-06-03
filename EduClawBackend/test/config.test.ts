@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import jwt from "jsonwebtoken";
 import { generateKeyPairSync } from "node:crypto";
-import { env, isInstitutionSsoConfigured, isMockSsoAllowed } from "../src/config/env.js";
+import { env, getProductionConfigIssues, isInstitutionSsoConfigured, isMockSsoAllowed } from "../src/config/env.js";
+import { buildCorsOptions, parseAllowedOrigins } from "../src/common/cors.js";
 import { HttpError } from "../src/common/errors.js";
 import { signAccessToken, verifyAccessToken } from "../src/modules/auth/jwt.js";
 import { resetSsoJwksCache, verifyInstitutionSsoIdToken } from "../src/modules/auth/sso.service.js";
@@ -12,6 +13,84 @@ afterEach(() => {
 });
 
 describe("environment config", () => {
+  it("does not require production-only configuration outside production", () => {
+    expect(getProductionConfigIssues({
+      NODE_ENV: "test",
+      JWT_ACCESS_SECRET: "shared-secret-at-least-thirty-two-chars",
+      JWT_REFRESH_SECRET: "shared-secret-at-least-thirty-two-chars",
+      CORS_ORIGINS: []
+    })).toEqual([]);
+  });
+
+  it("requires explicit production security configuration", () => {
+    expect(getProductionConfigIssues({
+      NODE_ENV: "production",
+      JWT_ACCESS_SECRET: "same-secret-at-least-thirty-two-chars",
+      JWT_REFRESH_SECRET: "same-secret-at-least-thirty-two-chars",
+      CORS_ORIGINS: []
+    })).toEqual([
+      "JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different",
+      "DATA_ENCRYPTION_KEY is required",
+      "CORS_ORIGINS must include at least one approved origin",
+      "institution SSO configuration is required"
+    ]);
+  });
+
+  it("accepts complete production security configuration", () => {
+    expect(getProductionConfigIssues({
+      NODE_ENV: "production",
+      JWT_ACCESS_SECRET: "access-secret-at-least-thirty-two-chars",
+      JWT_REFRESH_SECRET: "refresh-secret-at-least-thirty-two-chars",
+      DATA_ENCRYPTION_KEY: "encryption-key-at-least-thirty-two-chars",
+      CORS_ORIGINS: ["https://app.example.edu"],
+      SSO_ISSUER: "https://idp.example.edu",
+      SSO_AUDIENCE: "educlaw",
+      SSO_JWKS_URI: "https://idp.example.edu/.well-known/jwks.json"
+    })).toEqual([]);
+  });
+
+  it("parses comma-separated CORS origins", () => {
+    expect(parseAllowedOrigins("https://app.example.edu, https://faculty.example.edu ,,")).toEqual([
+      "https://app.example.edu",
+      "https://faculty.example.edu"
+    ]);
+  });
+
+  it("fails closed for production CORS when no origins are configured", () => {
+    const options = buildCorsOptions({ allowedOrigins: [], nodeEnv: "production" });
+
+    expect(options.origin).toBe(false);
+  });
+
+  it("allows only configured CORS origins", async () => {
+    const options = buildCorsOptions({
+      allowedOrigins: ["https://app.example.edu"],
+      nodeEnv: "production"
+    });
+
+    const checkOrigin = (origin?: string): Promise<boolean | undefined> => {
+      return new Promise((resolve, reject) => {
+        if (typeof options.origin !== "function") {
+          resolve(Boolean(options.origin));
+          return;
+        }
+
+        options.origin(origin, (error, allowed) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(Boolean(allowed));
+        });
+      });
+    };
+
+    await expect(checkOrigin("https://app.example.edu")).resolves.toBe(true);
+    await expect(checkOrigin("https://evil.example.edu")).resolves.toBe(false);
+    await expect(checkOrigin()).resolves.toBe(true);
+  });
+
   it("allows mock SSO only when explicitly enabled outside production", () => {
     expect(isMockSsoAllowed("test", true)).toBe(true);
     expect(isMockSsoAllowed("development", true)).toBe(true);
